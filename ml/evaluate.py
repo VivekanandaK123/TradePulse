@@ -1,6 +1,5 @@
 """
 TradePulse - Step 7: Evaluation Framework & Purged Walk-Forward Cross-Validation
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Implements rigorous evaluation metrics and validation splitting:
 1. PurgedWalkForwardCV: Expanding-window time series splitter with mandatory 3-bar purging.
@@ -12,6 +11,7 @@ from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
+    accuracy_score,
     balanced_accuracy_score,
     f1_score,
     precision_score,
@@ -86,6 +86,7 @@ def compute_classification_metrics(
     y_true = np.asarray(y_true, dtype=int)
     y_pred = np.asarray(y_pred, dtype=int)
 
+    acc = float(accuracy_score(y_true, y_pred))
     b_acc = float(balanced_accuracy_score(y_true, y_pred))
     macro_f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
 
@@ -97,6 +98,7 @@ def compute_classification_metrics(
     cm = confusion_matrix(y_true, y_pred, labels=classes).tolist()
 
     metrics: Dict[str, Any] = {
+        "accuracy": round(acc, 4),
         "balanced_accuracy": round(b_acc, 4),
         "macro_f1": round(macro_f1, 4),
         "down_precision": round(float(prec_per_class[0]), 4),

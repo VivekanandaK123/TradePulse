@@ -1,5 +1,5 @@
 """
-TradePulse - Evaluation & Baseline Unit Tests (Built-in unittest)
+TradePulse - Evaluation & Model Training Unit Tests (Built-in unittest)
 Author: TradePulse Team (IIT Patna, IMPACT Lab)
 """
 
@@ -19,7 +19,13 @@ from ml.evaluate import (
     compute_realized_trade_metrics,
     compute_fixed_coverage_precision,
 )
-from ml.train import MajorityBaseline, LogisticRegressionBaseline
+from ml.train import (
+    MajorityBaseline,
+    LogisticRegressionBaseline,
+    RandomForestModel,
+    XGBoostModel,
+    evaluate_model_validation,
+)
 
 
 class TestEvaluation(unittest.TestCase):
@@ -42,8 +48,10 @@ class TestEvaluation(unittest.TestCase):
         y_pred = np.array([1, 1, 0, 1, 0, -1, 0, 0, -1, 0])
         m = compute_classification_metrics(y_true, y_pred)
 
+        self.assertIn("accuracy", m)
         self.assertIn("balanced_accuracy", m)
         self.assertIn("macro_f1", m)
+        self.assertGreater(m["accuracy"], 0.70)
         self.assertGreater(m["balanced_accuracy"], 0.70)
         self.assertGreater(m["macro_f1"], 0.70)
 
@@ -66,7 +74,60 @@ class TestEvaluation(unittest.TestCase):
         preds = base.predict(X[:5])
         self.assertTrue((preds == 0).all())
 
+    def test_random_forest_model(self):
+        np.random.seed(42)
+        X = np.random.randn(100, 6)
+        y = np.random.choice([-1, 0, 1], size=100)
+        rf = RandomForestModel(n_estimators=10, max_depth=3, min_samples_leaf=5, random_state=42)
+        rf.fit(X, y)
+        preds = rf.predict(X)
+        probs = rf.predict_proba(X)
+
+        self.assertEqual(len(preds), 100)
+        self.assertEqual(probs.shape, (100, 3))
+        self.assertEqual(len(rf.feature_importances_), 6)
+
+    def test_xgboost_model(self):
+        np.random.seed(42)
+        X = np.random.randn(100, 6)
+        y = np.random.choice([-1, 0, 1], size=100)
+        xgb_model = XGBoostModel(n_estimators=10, max_depth=3, random_state=42)
+        xgb_model.fit(X, y)
+        preds = xgb_model.predict(X)
+        probs = xgb_model.predict_proba(X)
+
+        self.assertEqual(len(preds), 100)
+        self.assertEqual(probs.shape, (100, 3))
+        # Ensure predictions are strictly in {-1, 0, 1}
+        self.assertTrue(set(np.unique(preds)).issubset({-1, 0, 1}))
+        self.assertEqual(len(xgb_model.feature_importances_), 6)
+
+    def test_evaluate_model_validation(self):
+        np.random.seed(42)
+        n_train, n_val = 120, 40
+        features = [f"feat_{i}" for i in range(4)]
+        train_df = pd.DataFrame(np.random.randn(n_train, 4), columns=features)
+        train_df["label"] = np.random.choice([-1, 0, 1], size=n_train)
+
+        val_df = pd.DataFrame(np.random.randn(n_val, 4), columns=features)
+        val_df["label"] = np.random.choice([-1, 0, 1], size=n_val)
+        val_df["target_return"] = np.random.normal(0, 0.002, size=n_val)
+
+        rf = RandomForestModel(n_estimators=10, max_depth=3, min_samples_leaf=5, random_state=42)
+        res = evaluate_model_validation(
+            model=rf,
+            train_df=train_df,
+            val_df=val_df,
+            feature_cols=features,
+            label_col="label",
+        )
+
+        self.assertIn("accuracy", res)
+        self.assertIn("balanced_accuracy", res)
+        self.assertIn("macro_f1", res)
+        self.assertIn("cost_8bp_avg_trade_bps", res)
+        self.assertIn("fixed_10pct_cov_prec", res)
+
 
 if __name__ == "__main__":
     unittest.main()
-

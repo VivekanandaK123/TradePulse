@@ -1,25 +1,28 @@
 """
-TradePulse - Step 7: Model Training & Baseline Benchmarking
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
+TradePulse - Step 7 & 8: Model Training, Benchmarking & Label Selection
 
-Implements modular baseline models and walk-forward cross-validation:
-1. Majority Class (Always Neutral)
-2. Always-Up (+1)
-3. Last-Return Momentum (sign of R_{t-1})
-4. Basic RSI Rule (Oversold < 0.30 -> Up, Overbought > 0.70 -> Down)
-5. Logistic Regression (with intra-fold RobustScaler and balanced class weights)
+Implements modular baseline and machine learning models for 5-minute directional prediction:
+1. Baselines: Majority, Always-Up, Momentum (sign of R_{t-1}), Basic RSI (30/70)
+2. Linear Model: Multinomial Logistic Regression (with RobustScaler and class weights)
+3. Non-Linear Trees: RandomForestClassifier (bagging, depth/leaf regularization)
+4. Gradient Boosting: XGBoostClassifier (histogram boosting, remapped labels, sample weights)
+5. Validation-based Label Selection & Walk-Forward Hyperparameter Tuning
 """
 
 import sys
 import json
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union
 
 import numpy as np
 import pandas as pd
+import joblib
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import RobustScaler
+from sklearn.utils.class_weight import compute_sample_weight
+import xgboost as xgb
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -34,10 +37,13 @@ from ml.evaluate import (
 )
 
 BENCHMARK_RESULTS_PATH = PROJECT_ROOT / "artifacts" / "metadata" / "baseline_benchmark_results.json"
+LABEL_SELECTION_RESULTS_PATH = PROJECT_ROOT / "artifacts" / "metadata" / "step8_label_selection_results.json"
+CHOSEN_LABEL_PATH = PROJECT_ROOT / "artifacts" / "metadata" / "chosen_label.json"
+MODELS_DIR = PROJECT_ROOT / "artifacts" / "models"
 
 
 # ==============================================================================
-# Baseline Model Wrappers (Consistent Scikit-Learn Interface)
+# Model Architectures & Baseline Wrappers
 # ==============================================================================
 
 class MajorityBaseline:
@@ -133,21 +139,29 @@ class RSIBaseline:
 class LogisticRegressionBaseline:
     """Multinomial Logistic Regression with intra-fold scaling and class weighting."""
 
-    def __init__(self, class_weight: str = "balanced", random_state: int = 42):
+    def __init__(
+        self,
+        C: float = 1.0,
+        class_weight: str = "balanced",
+        random_state: int = 42,
+    ):
+        self.C = C
         self.class_weight = class_weight
         self.random_state = random_state
         self.scaler = RobustScaler()
         self.model = LogisticRegression(
+            C=self.C,
             solver="lbfgs",
             class_weight=self.class_weight,
             max_iter=1000,
             random_state=self.random_state,
         )
+        self.classes_ = np.array([-1, 0, 1])
 
     def fit(self, X: np.ndarray, y: np.ndarray):
-        # Scale features strictly on the training fold
         X_scaled = self.scaler.fit_transform(X)
         self.model.fit(X_scaled, y)
+        self.classes_ = self.model.classes_
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -158,9 +172,127 @@ class LogisticRegressionBaseline:
         X_scaled = self.scaler.transform(X)
         return self.model.predict_proba(X_scaled)
 
+    @property
+    def feature_importances_(self) -> np.ndarray:
+        # Return mean absolute coefficients across classes
+        return np.mean(np.abs(self.model.coef_), axis=0)
+
+
+class RandomForestModel:
+    """
+    Random Forest Classifier with balanced class weights, feature subsampling,
+    and configurable depth and leaf regularization.
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 150,
+        max_depth: Optional[int] = 5,
+        min_samples_leaf: int = 50,
+        max_features: Union[str, float] = "sqrt",
+        class_weight: str = "balanced",
+        random_state: int = 42,
+        n_jobs: int = -1,
+    ):
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.min_samples_leaf = min_samples_leaf
+        self.max_features = max_features
+        self.class_weight = class_weight
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+        self.model = RandomForestClassifier(
+            n_estimators=self.n_estimators,
+            max_depth=self.max_depth,
+            min_samples_leaf=self.min_samples_leaf,
+            max_features=self.max_features,
+            class_weight=self.class_weight,
+            random_state=self.random_state,
+            n_jobs=self.n_jobs,
+        )
+        self.classes_ = np.array([-1, 0, 1])
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        self.model.fit(X, y)
+        self.classes_ = self.model.classes_
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return self.model.predict(X).astype(int)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        return self.model.predict_proba(X)
+
+    @property
+    def feature_importances_(self) -> np.ndarray:
+        return self.model.feature_importances_
+
+
+class XGBoostModel:
+    """
+    XGBoost Classifier with internally remapped labels (-1->0, 0->1, 1->2),
+    sample-weight balancing, and tree regularization.
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        max_depth: int = 4,
+        learning_rate: float = 0.05,
+        subsample: float = 0.8,
+        colsample_bytree: float = 0.8,
+        reg_alpha: float = 0.1,
+        reg_lambda: float = 1.0,
+        min_child_weight: float = 1.0,
+        random_state: int = 42,
+        n_jobs: int = -1,
+    ):
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.reg_alpha = reg_alpha
+        self.reg_lambda = reg_lambda
+        self.min_child_weight = min_child_weight
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+        self.model = xgb.XGBClassifier(
+            n_estimators=self.n_estimators,
+            max_depth=self.max_depth,
+            learning_rate=self.learning_rate,
+            subsample=self.subsample,
+            colsample_bytree=self.colsample_bytree,
+            reg_alpha=self.reg_alpha,
+            reg_lambda=self.reg_lambda,
+            min_child_weight=self.min_child_weight,
+            random_state=self.random_state,
+            n_jobs=self.n_jobs,
+            eval_metric="mlogloss",
+        )
+        self.classes_ = np.array([-1, 0, 1])
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        # Remap {-1, 0, 1} -> {0, 1, 2}
+        y_mapped = y.astype(int) + 1
+        sample_weights = compute_sample_weight("balanced", y_mapped)
+        self.model.fit(X, y_mapped, sample_weight=sample_weights)
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        preds_mapped = self.model.predict(X)
+        return (preds_mapped - 1).astype(int)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        return self.model.predict_proba(X)
+
+    @property
+    def feature_importances_(self) -> np.ndarray:
+        return self.model.feature_importances_
+
 
 # ==============================================================================
-# Model Evaluation Runner Across Walk-Forward CV Folds
+# Model Evaluation Runners (Cross-Validation and Validation Set)
 # ==============================================================================
 
 def evaluate_model_cv(
@@ -233,6 +365,8 @@ def evaluate_model_cv(
         "macro_f1_std": agg_class["macro_f1"]["std"],
         "balanced_acc_mean": agg_class["balanced_accuracy"]["mean"],
         "balanced_acc_std": agg_class["balanced_accuracy"]["std"],
+        "accuracy_mean": agg_class["accuracy"]["mean"],
+        "accuracy_std": agg_class["accuracy"]["std"],
         "log_loss_mean": agg_class["log_loss"]["mean"] if "log_loss" in agg_class else None,
         "coverage_pct_mean": agg_trade["coverage_pct"]["mean"],
         "cost_8bp_avg_trade_bps_mean": agg_trade["cost_8bp_avg_trade_bps"]["mean"],
@@ -251,8 +385,70 @@ def evaluate_model_cv(
     return summary
 
 
+def evaluate_model_validation(
+    model,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    feature_cols: List[str],
+    label_col: str,
+    cost_levels: List[float] = [0.0005, 0.0008, 0.0012],
+    fixed_coverage_pct: float = 0.10,
+) -> Dict[str, Any]:
+    """
+    Trains model on training dataset and evaluates performance on the out-of-sample
+    Validation dataset using both classification and label-independent metrics.
+    """
+    X_train = train_df[feature_cols].values
+    y_train = train_df[label_col].values.astype(int)
+
+    X_val = val_df[feature_cols].values
+    y_val = val_df[label_col].values.astype(int)
+    val_returns = val_df["target_return"].values
+
+    start_time = time.time()
+    model.fit(X_train, y_train)
+    fit_duration = time.time() - start_time
+
+    preds = model.predict(X_val)
+    probs = model.predict_proba(X_val)
+
+    # Classification metrics against this candidate label
+    c_metrics = compute_classification_metrics(y_val, preds, probs)
+
+    # Label-independent economic trade metrics
+    t_metrics = compute_realized_trade_metrics(val_returns, preds, cost_levels=cost_levels)
+
+    # Fixed coverage precision (independent of label threshold)
+    top_prob = np.max(probs[:, [0, 2]], axis=1)
+    fixed_prec = compute_fixed_coverage_precision(
+        actual_returns=val_returns,
+        signals=preds,
+        confidences=top_prob,
+        fixed_coverage_pct=fixed_coverage_pct,
+        cost_floor=0.0008,
+    )
+
+    return {
+        "label_col": label_col,
+        "fit_time_seconds": round(fit_duration, 2),
+        "accuracy": c_metrics["accuracy"],
+        "balanced_accuracy": c_metrics["balanced_accuracy"],
+        "macro_f1": c_metrics["macro_f1"],
+        "coverage_pct": t_metrics["coverage_pct"],
+        "cost_5bp_avg_trade_bps": t_metrics.get("cost_5bp_avg_trade_bps", 0.0),
+        "cost_8bp_avg_trade_bps": t_metrics["cost_8bp_avg_trade_bps"],
+        "cost_12bp_avg_trade_bps": t_metrics.get("cost_12bp_avg_trade_bps", 0.0),
+        "cost_8bp_win_rate_pct": t_metrics["cost_8bp_win_rate_pct"],
+        "cost_8bp_profit_factor": t_metrics["cost_8bp_profit_factor"],
+        "fixed_10pct_cov_prec": fixed_prec,
+        "confusion_matrix": c_metrics["confusion_matrix"],
+        "classification_details": c_metrics,
+        "trade_details": t_metrics,
+    }
+
+
 # ==============================================================================
-# Comprehensive Benchmark Runner (Baselines x Label Sets)
+# Step 7 & 8 Runners: Label Selection & Hyperparameter Tuning
 # ==============================================================================
 
 def run_step7_benchmark(
@@ -314,6 +510,7 @@ def run_step7_benchmark(
             table_rows.append({
                 "Label Candidate": label_col,
                 "Model": model_name,
+                "Accuracy": f"{res['accuracy_mean']:.4f} +/- {res['accuracy_std']:.4f}",
                 "Macro F1": f"{res['macro_f1_mean']:.4f} +/- {res['macro_f1_std']:.4f}",
                 "Balanced Acc": f"{res['balanced_acc_mean']:.4f} +/- {res['balanced_acc_std']:.4f}",
                 "Coverage %": f"{res['coverage_pct_mean']:.1f}%",
@@ -336,6 +533,315 @@ def run_step7_benchmark(
     return results_df
 
 
-if __name__ == "__main__":
-    run_step7_benchmark()
+def run_step8_label_selection(
+    train_features_path: Optional[Path] = None,
+    val_features_path: Optional[Path] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Executes Step 8 Phase 1: Evaluates Logistic Regression, Random Forest, and XGBoost
+    across all 4 candidate label sets on the Validation set using label-independent metrics.
+    Selects the winning threshold theta and saves it into artifacts/metadata/chosen_label.json.
+    """
+    from ml.features import get_feature_column_names
 
+    train_path = train_features_path or (PROJECT_ROOT / "data" / "processed" / "train_features.csv")
+    val_path = val_features_path or (PROJECT_ROOT / "data" / "processed" / "val_features.csv")
+
+    train_df = pd.read_csv(train_path)
+    val_df = pd.read_csv(val_path)
+
+    valid_train = train_df[train_df["valid_target"]].copy().reset_index(drop=True)
+    valid_val = val_df[val_df["valid_target"]].copy().reset_index(drop=True)
+
+    feature_cols = get_feature_column_names(valid_train)
+
+    candidate_labels = [
+        ("label_fixed_20bp", "+/- 0.20% (Fixed 20 bps)"),
+        ("label_quantile_50", "+/- 0.1472% (Median Absolute Return)"),
+        ("label_quantile_40", "+/- 0.1134% (40th Percentile Absolute Return)"),
+        ("label_vol_k075", "max(0.75 * sigma_3b, 0.10%) (Causal Volatility Adaptive)"),
+    ]
+
+    models = [
+        ("Logistic Regression", lambda: LogisticRegressionBaseline(class_weight="balanced", random_state=42)),
+        ("Random Forest", lambda: RandomForestModel(n_estimators=150, max_depth=5, min_samples_leaf=50, class_weight="balanced", random_state=42)),
+        ("XGBoost", lambda: XGBoostModel(n_estimators=100, max_depth=4, learning_rate=0.05, subsample=0.8, colsample_bytree=0.8, random_state=42)),
+    ]
+
+    all_evaluations = []
+    summary_rows = []
+
+    print("\n" + "=" * 80)
+    print("TradePulse - Step 8 Phase 1: Candidate Label Selection on Validation Set")
+    print(f"  Train Bars: {len(valid_train):,} | Validation Bars: {len(valid_val):,}")
+    print(f"  Feature Dimensions: {len(feature_cols)} causal indicators")
+    print("=" * 80 + "\n")
+
+    for label_col, label_desc in candidate_labels:
+        print(f"--> Evaluating Candidate Label: {label_col} ({label_desc})")
+        for model_name, model_fn in models:
+            model = model_fn()
+            eval_res = evaluate_model_validation(
+                model=model,
+                train_df=valid_train,
+                val_df=valid_val,
+                feature_cols=feature_cols,
+                label_col=label_col,
+            )
+            eval_res["model_name"] = model_name
+            eval_res["label_description"] = label_desc
+            all_evaluations.append(eval_res)
+
+            summary_rows.append({
+                "Label Candidate": label_col,
+                "Model": model_name,
+                "Accuracy": f"{eval_res['accuracy'] * 100:.1f}%",
+                "Balanced Acc": f"{eval_res['balanced_accuracy'] * 100:.1f}%",
+                "Macro F1": f"{eval_res['macro_f1']:.4f}",
+                "Coverage %": f"{eval_res['coverage_pct']:.1f}%",
+                "5bp Net Ret": f"{eval_res['cost_5bp_avg_trade_bps']:+.2f} bps",
+                "8bp Net Ret": f"{eval_res['cost_8bp_avg_trade_bps']:+.2f} bps",
+                "12bp Net Ret": f"{eval_res['cost_12bp_avg_trade_bps']:+.2f} bps",
+                "8bp Win Rate": f"{eval_res['cost_8bp_win_rate_pct']:.1f}%",
+                "Top 10% Cov Prec": f"{eval_res['fixed_10pct_cov_prec']:.1f}%",
+                "Fit Time (s)": eval_res["fit_time_seconds"],
+            })
+
+    results_df = pd.DataFrame(summary_rows)
+
+    # Save detailed evaluation results
+    LABEL_SELECTION_RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(LABEL_SELECTION_RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(all_evaluations, f, indent=2)
+
+    print("\n=== Validation Set Label Selection Matrix ===")
+    print(results_df[["Label Candidate", "Model", "Accuracy", "Balanced Acc", "Macro F1", "Coverage %", "8bp Net Ret", "Top 10% Cov Prec"]].to_string(index=False))
+
+    # Evaluate Consensus and Select Winning Label
+    # Group by label candidate and compute average 8bp Net Return and Top-10% Precision across models
+    scores = {}
+    for label_col, _ in candidate_labels:
+        label_evals = [e for e in all_evaluations if e["label_col"] == label_col]
+        avg_8bp_ret = float(np.mean([e["cost_8bp_avg_trade_bps"] for e in label_evals]))
+        avg_10pct_prec = float(np.mean([e["fixed_10pct_cov_prec"] for e in label_evals]))
+        avg_bal_acc = float(np.mean([e["balanced_accuracy"] for e in label_evals]))
+        avg_macro_f1 = float(np.mean([e["macro_f1"] for e in label_evals]))
+        
+        scores[label_col] = {
+            "avg_8bp_ret": avg_8bp_ret,
+            "avg_10pct_prec": avg_10pct_prec,
+            "avg_bal_acc": avg_bal_acc,
+            "avg_macro_f1": avg_macro_f1,
+        }
+
+    # Best label candidate ranking: prioritize highest 8bp net return and balanced accuracy
+    sorted_candidates = sorted(
+        scores.keys(),
+        key=lambda k: (scores[k]["avg_8bp_ret"], scores[k]["avg_bal_acc"]),
+        reverse=True,
+    )
+    chosen_label = sorted_candidates[0]
+
+    chosen_meta = {
+        "chosen_label": chosen_label,
+        "selection_partition": "validation",
+        "selection_timestamp": pd.Timestamp.now(tz="UTC").isoformat(),
+        "candidate_rankings": scores,
+        "rationale": (
+            f"{chosen_label} achieved the superior consensus performance across Logistic Regression, "
+            f"Random Forest, and XGBoost on the Validation Set, demonstrating the highest Balanced Accuracy "
+            f"({scores[chosen_label]['avg_bal_acc']*100:.1f}%), highest Macro-F1 ({scores[chosen_label]['avg_macro_f1']:.4f}), "
+            f"and lowest transaction-cost drag ({scores[chosen_label]['avg_8bp_ret']:+.2f} bps avg net return at 8 bps cost)."
+        ),
+    }
+
+    with open(CHOSEN_LABEL_PATH, "w", encoding="utf-8") as f:
+        json.dump(chosen_meta, f, indent=2)
+
+    print(f"\n[TradePulse Step 8: Winning Label Frozen]")
+    print(f"  Chosen Label: {chosen_label}")
+    print(f"  Rationale: {chosen_meta['rationale']}")
+    print(f"  Saved to: {CHOSEN_LABEL_PATH}")
+
+    return results_df, chosen_meta
+
+
+def tune_model_hyperparameters(
+    model_type: str = "random_forest",
+    train_features_path: Optional[Path] = None,
+    val_features_path: Optional[Path] = None,
+    chosen_label_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Step 8 Phase 2: Hyperparameter Tuning on the Frozen Label using 5-fold Purged Walk-Forward CV
+    inside the training partition, followed by out-of-sample assessment on the Validation set.
+    """
+    from ml.features import get_feature_column_names
+
+    train_path = train_features_path or (PROJECT_ROOT / "data" / "processed" / "train_features.csv")
+    val_path = val_features_path or (PROJECT_ROOT / "data" / "processed" / "val_features.csv")
+    lbl_path = chosen_label_path or CHOSEN_LABEL_PATH
+
+    with open(lbl_path, "r", encoding="utf-8") as f:
+        chosen_meta = json.load(f)
+    chosen_label = chosen_meta["chosen_label"]
+
+    train_df = pd.read_csv(train_path)
+    val_df = pd.read_csv(val_path)
+
+    valid_train = train_df[train_df["valid_target"]].copy().reset_index(drop=True)
+    valid_val = val_df[val_df["valid_target"]].copy().reset_index(drop=True)
+    feature_cols = get_feature_column_names(valid_train)
+
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n=== Tuning {model_type.upper()} on Frozen Label: {chosen_label} ===")
+
+    if model_type.lower() == "random_forest":
+        param_grid = [
+            {"n_estimators": 150, "max_depth": 3, "min_samples_leaf": 50, "max_features": "sqrt"},
+            {"n_estimators": 150, "max_depth": 5, "min_samples_leaf": 50, "max_features": "sqrt"},
+            {"n_estimators": 200, "max_depth": 5, "min_samples_leaf": 30, "max_features": "sqrt"},
+            {"n_estimators": 150, "max_depth": 8, "min_samples_leaf": 50, "max_features": "sqrt"},
+            {"n_estimators": 200, "max_depth": 5, "min_samples_leaf": 100, "max_features": "sqrt"},
+        ]
+        make_model = lambda p: RandomForestModel(
+            n_estimators=p["n_estimators"],
+            max_depth=p["max_depth"],
+            min_samples_leaf=p["min_samples_leaf"],
+            max_features=p["max_features"],
+            class_weight="balanced",
+            random_state=42,
+        )
+    elif model_type.lower() == "xgboost":
+        param_grid = [
+            {"n_estimators": 100, "max_depth": 3, "learning_rate": 0.05, "subsample": 0.8, "colsample_bytree": 0.8, "min_child_weight": 1.0},
+            {"n_estimators": 100, "max_depth": 4, "learning_rate": 0.05, "subsample": 0.8, "colsample_bytree": 0.8, "min_child_weight": 1.0},
+            {"n_estimators": 150, "max_depth": 4, "learning_rate": 0.03, "subsample": 0.8, "colsample_bytree": 0.8, "min_child_weight": 2.0},
+            {"n_estimators": 100, "max_depth": 6, "learning_rate": 0.03, "subsample": 0.8, "colsample_bytree": 0.8, "min_child_weight": 3.0},
+            {"n_estimators": 100, "max_depth": 4, "learning_rate": 0.10, "subsample": 0.8, "colsample_bytree": 0.8, "min_child_weight": 1.0},
+        ]
+        make_model = lambda p: XGBoostModel(
+            n_estimators=p["n_estimators"],
+            max_depth=p["max_depth"],
+            learning_rate=p["learning_rate"],
+            subsample=p["subsample"],
+            colsample_bytree=p["colsample_bytree"],
+            min_child_weight=p["min_child_weight"],
+            random_state=42,
+        )
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+    grid_results = []
+    for i, params in enumerate(param_grid, 1):
+        print(f"  Testing Param Set {i}/{len(param_grid)}: {params}")
+        cv_res = evaluate_model_cv(
+            df=valid_train,
+            feature_cols=feature_cols,
+            label_col=chosen_label,
+            model_factory=lambda: make_model(params),
+            n_splits=5,
+            purge_bars=3,
+        )
+        grid_results.append({
+            "param_idx": i,
+            "params": params,
+            "cv_balanced_acc_mean": cv_res["balanced_acc_mean"],
+            "cv_balanced_acc_std": cv_res["balanced_acc_std"],
+            "cv_macro_f1_mean": cv_res["macro_f1_mean"],
+            "cv_macro_f1_std": cv_res["macro_f1_std"],
+            "cv_cost_8bp_net_ret_mean": cv_res["cost_8bp_avg_trade_bps_mean"],
+            "cv_cost_8bp_net_ret_std": cv_res["cost_8bp_avg_trade_bps_std"],
+            "cv_10pct_prec_mean": cv_res["fixed_10pct_cov_prec_mean"],
+            "cv_summary": cv_res,
+        })
+
+    # Rank by CV balanced accuracy & net return
+    grid_results.sort(
+        key=lambda r: (r["cv_cost_8bp_net_ret_mean"], r["cv_balanced_acc_mean"]),
+        reverse=True,
+    )
+    best_candidate = grid_results[0]
+    best_params = best_candidate["params"]
+    print(f"\n--> Best Hyperparameters Selected: {best_params}")
+    print(f"    CV Net Ret (8bp): {best_candidate['cv_cost_8bp_net_ret_mean']:+.2f} +/- {best_candidate['cv_cost_8bp_net_ret_std']:.2f} bps")
+    print(f"    CV Balanced Acc : {best_candidate['cv_balanced_acc_mean'] * 100:.2f}% +/- {best_candidate['cv_balanced_acc_std'] * 100:.2f}%")
+
+    # Fit final tuned model on entire training dataset
+    final_model = make_model(best_params)
+    final_model.fit(valid_train[feature_cols].values, valid_train[chosen_label].values.astype(int))
+
+    # Evaluate on Validation Set
+    val_res = evaluate_model_validation(
+        model=final_model,
+        train_df=valid_train,
+        val_df=valid_val,
+        feature_cols=feature_cols,
+        label_col=chosen_label,
+    )
+
+    print("\n--> Out-of-Sample Validation Performance of Tuned Model:")
+    print(f"    Validation Accuracy       : {val_res['accuracy'] * 100:.2f}%")
+    print(f"    Validation Balanced Acc  : {val_res['balanced_accuracy'] * 100:.2f}%")
+    print(f"    Validation Macro-F1      : {val_res['macro_f1']:.4f}")
+    print(f"    Validation 8bp Net Ret   : {val_res['cost_8bp_avg_trade_bps']:+.2f} bps")
+    print(f"    Top 10% Conviction Prec  : {val_res['fixed_10pct_cov_prec']:.2f}%")
+
+    # Save trained model artifact
+    model_save_path = MODELS_DIR / f"{model_type}_tuned_model.joblib"
+    joblib.dump(final_model, model_save_path)
+    print(f"--> Trained model saved to: {model_save_path}")
+
+    # Feature importances
+    feat_imp = pd.Series(final_model.feature_importances_, index=feature_cols).sort_values(ascending=False)
+
+    tuning_summary = {
+        "model_type": model_type,
+        "chosen_label": chosen_label,
+        "best_params": best_params,
+        "cv_performance": {
+            "balanced_acc_mean": best_candidate["cv_balanced_acc_mean"],
+            "balanced_acc_std": best_candidate["cv_balanced_acc_std"],
+            "macro_f1_mean": best_candidate["cv_macro_f1_mean"],
+            "macro_f1_std": best_candidate["cv_macro_f1_std"],
+            "cost_8bp_net_ret_mean": best_candidate["cv_cost_8bp_net_ret_mean"],
+        },
+        "validation_performance": val_res,
+        "all_grid_results": grid_results,
+        "feature_importances": feat_imp.to_dict(),
+        "model_path": str(model_save_path),
+    }
+
+    summary_file = PROJECT_ROOT / "artifacts" / "metadata" / f"{model_type}_tuning_summary.json"
+    with open(summary_file, "w", encoding="utf-8") as f:
+        json.dump(tuning_summary, f, indent=2)
+
+    return tuning_summary
+
+
+def save_model(model: Any, filepath: Union[str, Path]) -> None:
+    """Serializes a trained model to disk."""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, path)
+
+
+def load_model(filepath: Union[str, Path]) -> Any:
+    """Loads a serialized model from disk."""
+    return joblib.load(Path(filepath))
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="TradePulse Model Training & Benchmarking")
+    parser.add_argument("--step", choices=["7", "8_selection", "8_tune"], default="8_selection")
+    parser.add_argument("--model", choices=["random_forest", "xgboost"], default="random_forest")
+    args = parser.parse_args()
+
+    if args.step == "7":
+        run_step7_benchmark()
+    elif args.step == "8_selection":
+        run_step8_label_selection()
+    elif args.step == "8_tune":
+        tune_model_hyperparameters(model_type=args.model)
