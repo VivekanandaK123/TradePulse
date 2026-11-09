@@ -28,6 +28,7 @@ from ml.preprocessing import EXCHANGE_TIMEZONE
 
 METADATA_DIR = PROJECT_ROOT / "artifacts" / "metadata"
 FROZEN_THRESHOLDS_PATH = METADATA_DIR / "target_thresholds.json"
+PROCESSED_TARGETS_CSV_PATH = PROJECT_ROOT / "data" / "processed" / "META_5min_targets.csv"
 
 
 # ==============================================================================
@@ -109,9 +110,15 @@ def compute_candidate_thresholds(train_df: pd.DataFrame) -> Dict[str, Any]:
         median_vol_3bar = float(r.std())
 
     threshold_params: Dict[str, Any] = {
+        "candidate_labels": [
+            "label_fixed_20bp",
+            "label_quantile_50",
+            "label_quantile_40",
+            "label_vol_k075",
+        ],
+        "assumed_cost_roundtrip": 0.0008,  # 8 bps assumed round-trip (spread + slippage)
+        "cost_sensitivity_levels": [0.0005, 0.0008, 0.0012],  # 5 bps, 8 bps, 12 bps
         "fixed_rules": {
-            "fixed_10bp": {"theta": 0.0010, "description": "Fixed cut at +/-0.10% (10 bps)"},
-            "fixed_15bp": {"theta": 0.0015, "description": "Fixed cut at +/-0.15% (15 bps)"},
             "fixed_20bp": {"theta": 0.0020, "description": "Fixed cut at +/-0.20% (20 bps)"},
         },
         "quantile_rules": {
@@ -125,30 +132,13 @@ def compute_candidate_thresholds(train_df: pd.DataFrame) -> Dict[str, Any]:
                 "theta": float(abs_r.quantile(0.50)),
                 "description": f"Symmetric 50th percentile (median) of |R_train| ({abs_r.quantile(0.50)*100:.4f}%)",
             },
-            "quantile_60": {
-                "percentile": 60,
-                "theta": float(abs_r.quantile(0.60)),
-                "description": f"Symmetric 60th percentile of |R_train| ({abs_r.quantile(0.60)*100:.4f}%)",
-            },
         },
         "volatility_rules": {
-            "vol_k050": {
-                "k": 0.50,
-                "median_vol_3bar": median_vol_3bar,
-                "min_floor_theta": 0.0008,
-                "description": "Causal volatility: theta_t = max(0.50 * sigma_{t,3b}, 0.08%)",
-            },
             "vol_k075": {
                 "k": 0.75,
                 "median_vol_3bar": median_vol_3bar,
-                "min_floor_theta": 0.0008,
-                "description": "Causal volatility: theta_t = max(0.75 * sigma_{t,3b}, 0.08%)",
-            },
-            "vol_k100": {
-                "k": 1.00,
-                "median_vol_3bar": median_vol_3bar,
-                "min_floor_theta": 0.0008,
-                "description": "Causal volatility: theta_t = max(1.00 * sigma_{t,3b}, 0.08%)",
+                "min_floor_theta": 0.0010,  # 10 bps minimum floor, strictly above assumed 8 bps round-trip cost
+                "description": "Causal volatility: theta_t = max(0.75 * sigma_{t,3b}, 0.10%)",
             },
         },
         "train_statistics": {
@@ -156,7 +146,7 @@ def compute_candidate_thresholds(train_df: pd.DataFrame) -> Dict[str, Any]:
             "return_mean": float(r.mean()),
             "return_std": float(r.std()),
             "abs_return_median": float(abs_r.median()),
-            "cost_floor": 0.0008,
+            "cost_floor": 0.0010,
         },
     }
 
@@ -223,6 +213,57 @@ def assign_labels_for_rule(
     return labels
 
 
+def build_and_save_target_dataset(
+    clean_csv_path: Optional[Path] = None,
+    output_csv_path: Optional[Path] = None,
+    threshold_params: Optional[Dict[str, Any]] = None,
+) -> pd.DataFrame:
+    """
+    Computes 3-bar forward returns and all frozen candidate labels across
+    the entire dataset, saving the materialized dataset to data/processed/META_5min_targets.csv.
+    """
+    from ml.preprocessing import PROCESSED_CSV_PATH
+
+    clean_path = clean_csv_path or PROCESSED_CSV_PATH
+    out_path = output_csv_path or PROCESSED_TARGETS_CSV_PATH
+
+    df = pd.read_csv(clean_path)
+    with_returns = compute_forward_returns(df, horizon_bars=3)
+
+    if threshold_params is None:
+        if FROZEN_THRESHOLDS_PATH.exists():
+            with open(FROZEN_THRESHOLDS_PATH, "r", encoding="utf-8") as f:
+                threshold_params = json.load(f)
+        else:
+            # Fit strictly on train split: 2025-11-03 to 2026-06-30
+            train_mask = (with_returns["session_date"].astype(str) >= "2025-11-03") & (
+                with_returns["session_date"].astype(str) <= "2026-06-30"
+            )
+            threshold_params = compute_candidate_thresholds(with_returns[train_mask])
+
+    # Attach candidate rule labels
+    for rname in threshold_params["fixed_rules"]:
+        with_returns[f"label_{rname}"] = assign_labels_for_rule(
+            with_returns, "fixed", rname, threshold_params
+        )
+
+    for rname in threshold_params["quantile_rules"]:
+        with_returns[f"label_{rname}"] = assign_labels_for_rule(
+            with_returns, "quantile", rname, threshold_params
+        )
+
+    for rname in threshold_params["volatility_rules"]:
+        with_returns[f"label_{rname}"] = assign_labels_for_rule(
+            with_returns, "volatility", rname, threshold_params
+        )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with_returns.to_csv(out_path, index=False)
+    print(f"  Target dataset saved to: {out_path} ({len(with_returns):,} rows)")
+
+    return with_returns
+
+
 # ==============================================================================
 # Pipeline Sanity Check Runner
 # ==============================================================================
@@ -241,6 +282,9 @@ if __name__ == "__main__":
 
     params = compute_candidate_thresholds(train_df)
     print(f"  Candidate thresholds computed and frozen at: {FROZEN_THRESHOLDS_PATH}")
+
+    # Build and materialize target dataset
+    targets_df = build_and_save_target_dataset(threshold_params=params)
 
     # Test label generation
     labels_q50 = assign_labels_for_rule(train_df, "quantile", "quantile_50", params)
