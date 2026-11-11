@@ -1,0 +1,2148 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TradePulse Live Indicator API (Final)",
+    "description": "Intraday AI-powered directional trading indicator for META (NASDAQ) on 5-minute bars.",
+    "version": "1.0.0-final"
+  },
+  "paths": {
+    "/api/v1/signals/latest": {
+      "get": {
+        "tags": [
+          "Signals Final"
+        ],
+        "summary": "Get Latest Signal",
+        "description": "Returns the latest emitted prediction for the most recent closed 5-minute candle.",
+        "operationId": "get_latest_signal_api_v1_signals_latest_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalPayload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signals/history": {
+      "get": {
+        "tags": [
+          "Signals Final"
+        ],
+        "summary": "Get Signal History",
+        "description": "Returns recent closed candle signals for lightweight financial chart rendering.",
+        "operationId": "get_signal_history_api_v1_signals_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/monitoring/status": {
+      "get": {
+        "tags": [
+          "Signals Final"
+        ],
+        "summary": "Get Monitoring Status",
+        "description": "Returns system health, buffer size, uptime, and running signal frequency vs target (37.5/day).",
+        "operationId": "get_monitoring_status_api_v1_monitoring_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signals/feed_bar": {
+      "post": {
+        "tags": [
+          "Signals Final"
+        ],
+        "summary": "Feed Candle Bar",
+        "description": "Internal / Testing endpoint: feeds a single closed candle into the inference service.",
+        "operationId": "feed_candle_bar_api_v1_signals_feed_bar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Bar Dict"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SignalPayload"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Feed Candle Bar Api V1 Signals Feed Bar Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "System Health & Diagnostic Status",
+        "description": "Returns service health status, artifact cryptographic hashes,\ndata feed connectivity ('Alpaca IEX, 5-min'), and real-time NASDAQ market calendar status.",
+        "operationId": "get_health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meta": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Model Metadata & Performance Metrics",
+        "description": "Returns complete model metadata loaded from ui_summary_final.json:\n- Target label definition (theta = 15 bps, 15-minute horizon)\n- 29 causal feature count & summaries\n- Headline validation and one-time held-out test metrics with 95% CIs\n- Cost assumptions (8 bp institutional convention)\n- edge_demonstrated boolean flag (false)\n- Real-time NASDAQ market hours & countdown",
+        "operationId": "get_meta_api_meta_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Historical Candlesticks & Split Bands",
+        "description": "Returns lightweight financial candlesticks for the full training history (~19.6k bars)\nor zoomed ranges, along with labeled period bands for Train, Validation, and Test splits.\nSupports ETag HTTP caching for smooth client-side zooming and panning.",
+        "operationId": "get_history_api_history_get",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(1D|5D|1M|3M|All|all)$",
+              "description": "Historical range: 1D, 5D, 1M, 3M, or All",
+              "default": "1M",
+              "title": "Range"
+            },
+            "description": "Historical range: 1D, 5D, 1M, 3M, or All"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/oof-signals": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Out-of-Fold Historical Signals",
+        "description": "Returns out-of-fold historical predictions from the training cross-validation pipeline.\nLabeled with strict disclosure: 'Out-of-fold, historical, not live results.'",
+        "operationId": "get_oof_signals_api_history_oof_signals_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OOFSignalsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/live/test-now": {
+      "post": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Evaluate Closed Candle Signal ('Test Now')",
+        "description": "Fetches the latest live closed 5-minute candle, evaluates directional conviction,\napplies the frozen conviction gating rule (tau = 0.2635), and returns the prediction payload.\n\nIdempotent: If a prediction for the current bar is already logged, returns the stored signal\nwithout recomputing or modifying the append-only log.",
+        "operationId": "test_now_api_live_test_now_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestNowResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/live/stream": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Server-Sent Events (SSE) Live Bar & Signal Stream",
+        "description": "Server-Sent Events (SSE) streaming endpoint for 'Auto Mode'.\nPushes newly closed 5-minute bar events and predictions automatically at candle close.",
+        "operationId": "live_stream_api_live_stream_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/signals": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Immutable Append-Only Signal Log",
+        "description": "Returns the immutable audit log of emitted directional signals from live_signals_final.jsonl.\nIncludes tamper-evident checksums for verifiable audit compliance.",
+        "operationId": "get_signals_log_api_signals_get",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by session date, e.g. 2026-11-06",
+              "title": "Session"
+            },
+            "description": "Filter by session date, e.g. 2026-11-06"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalsLogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/outcomes": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Realized 3-Bar Outcomes",
+        "description": "Returns realized 15-minute (3-bar) trade outcomes from live_outcomes_final.jsonl:\ngross return, directional return, net return (@ 8bp cost convention), and hit/miss status.",
+        "operationId": "get_outcomes_api_outcomes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/start": {
+      "post": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Start Historical Session Replay",
+        "description": "Starts stepping through a chosen historical trading session candle-by-candle.\nReplay writes strictly to an isolated replay log, never modifying live logs.",
+        "operationId": "replay_start_api_replay_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/step": {
+      "post": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Step Forward One Replay Candle",
+        "description": "Advances replay by one 5-minute candle.",
+        "operationId": "replay_step_api_replay_step_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/pause": {
+      "post": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Pause Replay Playback",
+        "description": "Pauses active session replay.",
+        "operationId": "replay_pause_api_replay_pause_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/stop": {
+      "post": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Stop Replay Playback",
+        "description": "Stops replay and returns state to STOPPED.",
+        "operationId": "replay_stop_api_replay_stop_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/state": {
+      "get": {
+        "tags": [
+          "TradePulse Core API"
+        ],
+        "summary": "Get Current Replay Playback State",
+        "description": "Returns the current replay playback position, active candle, and emitted signals count.",
+        "operationId": "replay_state_api_replay_state_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Read Root",
+        "operationId": "read_root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CandleBar": {
+        "properties": {
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "UTC epoch seconds (candlestick open or close anchor for Lightweight Charts)"
+          },
+          "open": {
+            "type": "number",
+            "title": "Open"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "close": {
+            "type": "number",
+            "title": "Close"
+          },
+          "volume": {
+            "type": "number",
+            "title": "Volume"
+          },
+          "vwap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vwap"
+          },
+          "is_filled": {
+            "type": "boolean",
+            "title": "Is Filled",
+            "description": "True if bar was synthetically filled due to missing feed interval",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "title": "CandleBar"
+      },
+      "CostAssumption": {
+        "properties": {
+          "institutional_friction_bps": {
+            "type": "number",
+            "title": "Institutional Friction Bps"
+          },
+          "conservative_friction_bps": {
+            "type": "number",
+            "title": "Conservative Friction Bps"
+          },
+          "low_friction_bps": {
+            "type": "number",
+            "title": "Low Friction Bps"
+          },
+          "convention": {
+            "type": "string",
+            "title": "Convention"
+          }
+        },
+        "type": "object",
+        "required": [
+          "institutional_friction_bps",
+          "conservative_friction_bps",
+          "low_friction_bps",
+          "convention"
+        ],
+        "title": "CostAssumption"
+      },
+      "DatasetScope": {
+        "properties": {
+          "training_date_range": {
+            "$ref": "#/components/schemas/TrainingDateRange"
+          },
+          "experiment_splits": {
+            "$ref": "#/components/schemas/ExperimentSplits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "training_date_range",
+          "experiment_splits"
+        ],
+        "title": "DatasetScope"
+      },
+      "ExperimentSplits": {
+        "properties": {
+          "train": {
+            "$ref": "#/components/schemas/SplitBoundary"
+          },
+          "embargo_1": {
+            "$ref": "#/components/schemas/SplitBoundary"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/SplitBoundary"
+          },
+          "embargo_2": {
+            "$ref": "#/components/schemas/SplitBoundary"
+          },
+          "test": {
+            "$ref": "#/components/schemas/SplitBoundary"
+          },
+          "split_note": {
+            "type": "string",
+            "title": "Split Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "train",
+          "embargo_1",
+          "validation",
+          "embargo_2",
+          "test",
+          "split_note"
+        ],
+        "title": "ExperimentSplits"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HeadlineMetrics": {
+        "properties": {
+          "validation": {
+            "$ref": "#/components/schemas/ValidationMetrics"
+          },
+          "held_out_test": {
+            "$ref": "#/components/schemas/TestMetrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "validation",
+          "held_out_test"
+        ],
+        "title": "HeadlineMetrics"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'HEALTHY', 'DEGRADED', or 'OFFLINE'"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "title": "Uptime Seconds",
+            "description": "Service uptime in seconds"
+          },
+          "feed_connectivity": {
+            "type": "string",
+            "title": "Feed Connectivity",
+            "description": "'CONNECTED', 'REPLAY_MODE', or 'DISCONNECTED'"
+          },
+          "feed_name": {
+            "type": "string",
+            "title": "Feed Name",
+            "description": "Data feed identifier, e.g. 'Alpaca IEX, 5-min'"
+          },
+          "active_symbol": {
+            "type": "string",
+            "title": "Active Symbol",
+            "description": "Asset symbol, 'META'"
+          },
+          "market_status": {
+            "$ref": "#/components/schemas/MarketStatus"
+          },
+          "artifact_hashes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Artifact Hashes",
+            "description": "SHA-256 hashes of frozen model artifacts"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "description": "Model version tag and git commit hash"
+          },
+          "last_data_freshness_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Data Freshness Seconds",
+            "description": "Seconds since the last closed 5-minute candle"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "uptime_seconds",
+          "feed_connectivity",
+          "feed_name",
+          "active_symbol",
+          "market_status",
+          "artifact_hashes",
+          "model_version"
+        ],
+        "title": "HealthResponse"
+      },
+      "HistoryResponse": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "range": {
+            "type": "string",
+            "title": "Range",
+            "description": "'1D', '5D', '1M', '3M', or 'All'"
+          },
+          "bars_count": {
+            "type": "integer",
+            "title": "Bars Count"
+          },
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/CandleBar"
+            },
+            "type": "array",
+            "title": "Bars"
+          },
+          "period_bands": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodBand"
+            },
+            "type": "array",
+            "title": "Period Bands"
+          },
+          "prev_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Close"
+          },
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "range",
+          "bars_count",
+          "bars",
+          "period_bands",
+          "etag"
+        ],
+        "title": "HistoryResponse"
+      },
+      "MarketStatus": {
+        "properties": {
+          "is_open": {
+            "type": "boolean",
+            "title": "Is Open",
+            "description": "True if US equity markets are currently in regular trading hours (09:30-16:00 ET)"
+          },
+          "session_state": {
+            "type": "string",
+            "title": "Session State",
+            "description": "'OPEN', 'CLOSED', 'EARLY_CLOSE', 'PRE_MARKET', 'AFTER_HOURS'"
+          },
+          "current_time_utc": {
+            "type": "integer",
+            "title": "Current Time Utc",
+            "description": "Current server time in UTC epoch seconds"
+          },
+          "next_open_utc": {
+            "type": "integer",
+            "title": "Next Open Utc",
+            "description": "Next market open timestamp in UTC epoch seconds"
+          },
+          "next_close_utc": {
+            "type": "integer",
+            "title": "Next Close Utc",
+            "description": "Next market close timestamp in UTC epoch seconds"
+          },
+          "countdown_seconds": {
+            "type": "integer",
+            "title": "Countdown Seconds",
+            "description": "Seconds remaining until next market open or close"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Human-readable market status description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_open",
+          "session_state",
+          "current_time_utc",
+          "next_open_utc",
+          "next_close_utc",
+          "countdown_seconds",
+          "description"
+        ],
+        "title": "MarketStatus"
+      },
+      "MetaResponse": {
+        "properties": {
+          "asset": {
+            "type": "string",
+            "title": "Asset"
+          },
+          "exchange": {
+            "type": "string",
+            "title": "Exchange"
+          },
+          "timeframe": {
+            "type": "string",
+            "title": "Timeframe"
+          },
+          "label_name": {
+            "type": "string",
+            "title": "Label Name"
+          },
+          "theta_bps": {
+            "type": "number",
+            "title": "Theta Bps"
+          },
+          "theta_pct": {
+            "type": "number",
+            "title": "Theta Pct"
+          },
+          "horizon_bars": {
+            "type": "integer",
+            "title": "Horizon Bars"
+          },
+          "horizon_minutes": {
+            "type": "integer",
+            "title": "Horizon Minutes"
+          },
+          "classes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Classes"
+          },
+          "feature_count": {
+            "type": "integer",
+            "title": "Feature Count"
+          },
+          "features_summary": {
+            "type": "string",
+            "title": "Features Summary"
+          },
+          "model_architecture": {
+            "type": "string",
+            "title": "Model Architecture"
+          },
+          "probability_calibration": {
+            "type": "string",
+            "title": "Probability Calibration"
+          },
+          "recency_weighting": {
+            "$ref": "#/components/schemas/RecencyWeightingMeta"
+          },
+          "signal_rule": {
+            "$ref": "#/components/schemas/SignalRuleMeta"
+          },
+          "dataset_scope": {
+            "$ref": "#/components/schemas/DatasetScope"
+          },
+          "headline_metrics": {
+            "$ref": "#/components/schemas/HeadlineMetrics"
+          },
+          "cost_assumption": {
+            "$ref": "#/components/schemas/CostAssumption"
+          },
+          "edge_demonstrated": {
+            "type": "boolean",
+            "title": "Edge Demonstrated"
+          },
+          "edge_statement": {
+            "type": "string",
+            "title": "Edge Statement"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer"
+          },
+          "market_status": {
+            "$ref": "#/components/schemas/MarketStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset",
+          "exchange",
+          "timeframe",
+          "label_name",
+          "theta_bps",
+          "theta_pct",
+          "horizon_bars",
+          "horizon_minutes",
+          "classes",
+          "feature_count",
+          "features_summary",
+          "model_architecture",
+          "probability_calibration",
+          "recency_weighting",
+          "signal_rule",
+          "dataset_scope",
+          "headline_metrics",
+          "cost_assumption",
+          "edge_demonstrated",
+          "edge_statement",
+          "disclaimer",
+          "market_status"
+        ],
+        "title": "MetaResponse"
+      },
+      "MonitoringStatusResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'HEALTHY', 'DEGRADED', 'WARNING', or 'INITIALIZING'"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "title": "Uptime Seconds"
+          },
+          "buffer_bars_count": {
+            "type": "integer",
+            "title": "Buffer Bars Count"
+          },
+          "min_required_bars": {
+            "type": "integer",
+            "title": "Min Required Bars"
+          },
+          "last_update_ny": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Update Ny"
+          },
+          "total_bars_processed": {
+            "type": "integer",
+            "title": "Total Bars Processed"
+          },
+          "signals_today_count": {
+            "type": "integer",
+            "title": "Signals Today Count"
+          },
+          "expected_signals_per_day": {
+            "type": "number",
+            "title": "Expected Signals Per Day"
+          },
+          "gaps_filled_count": {
+            "type": "integer",
+            "title": "Gaps Filled Count"
+          },
+          "error_count": {
+            "type": "integer",
+            "title": "Error Count"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          },
+          "active_feed": {
+            "type": "string",
+            "title": "Active Feed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "symbol",
+          "uptime_seconds",
+          "buffer_bars_count",
+          "min_required_bars",
+          "last_update_ny",
+          "total_bars_processed",
+          "signals_today_count",
+          "expected_signals_per_day",
+          "gaps_filled_count",
+          "error_count",
+          "model_version",
+          "active_feed"
+        ],
+        "title": "MonitoringStatusResponse"
+      },
+      "OOFSignalItem": {
+        "properties": {
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "UTC epoch seconds of closed candle"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction",
+            "description": "'Up', 'Down', or 'no clear signal'"
+          },
+          "signal_code": {
+            "type": "integer",
+            "title": "Signal Code",
+            "description": "1, -1, or 0"
+          },
+          "confidence_pct": {
+            "type": "number",
+            "title": "Confidence Pct"
+          },
+          "conviction": {
+            "type": "number",
+            "title": "Conviction"
+          },
+          "is_gated": {
+            "type": "boolean",
+            "title": "Is Gated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "direction",
+          "signal_code",
+          "confidence_pct",
+          "conviction",
+          "is_gated"
+        ],
+        "title": "OOFSignalItem"
+      },
+      "OOFSignalsResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/OOFSignalItem"
+            },
+            "type": "array",
+            "title": "Signals"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "'Out-of-fold, historical, not live results.'"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "count",
+          "signals",
+          "note"
+        ],
+        "title": "OOFSignalsResponse"
+      },
+      "OutcomeItem": {
+        "properties": {
+          "signal_id": {
+            "type": "string",
+            "title": "Signal Id"
+          },
+          "signal_time": {
+            "type": "integer",
+            "title": "Signal Time"
+          },
+          "resolution_time": {
+            "type": "integer",
+            "title": "Resolution Time"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "signal_code": {
+            "type": "integer",
+            "title": "Signal Code"
+          },
+          "confidence_pct": {
+            "type": "number",
+            "title": "Confidence Pct"
+          },
+          "entry_price": {
+            "type": "number",
+            "title": "Entry Price"
+          },
+          "exit_price": {
+            "type": "number",
+            "title": "Exit Price"
+          },
+          "realized_return_bps": {
+            "type": "number",
+            "title": "Realized Return Bps"
+          },
+          "directional_return_bps": {
+            "type": "number",
+            "title": "Directional Return Bps"
+          },
+          "net_return_bps_8bp": {
+            "type": "number",
+            "title": "Net Return Bps 8Bp"
+          },
+          "is_hit": {
+            "type": "boolean",
+            "title": "Is Hit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "signal_id",
+          "signal_time",
+          "resolution_time",
+          "direction",
+          "signal_code",
+          "confidence_pct",
+          "entry_price",
+          "exit_price",
+          "realized_return_bps",
+          "directional_return_bps",
+          "net_return_bps_8bp",
+          "is_hit"
+        ],
+        "title": "OutcomeItem"
+      },
+      "OutcomesResponse": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeItem"
+            },
+            "type": "array",
+            "title": "Outcomes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "outcomes"
+        ],
+        "title": "OutcomesResponse"
+      },
+      "PeriodBand": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "'train', 'validation', 'test', or 'embargo'"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Display label, e.g. 'Training Set'"
+          },
+          "start_time": {
+            "type": "integer",
+            "title": "Start Time",
+            "description": "Start timestamp in UTC epoch seconds"
+          },
+          "end_time": {
+            "type": "integer",
+            "title": "End Time",
+            "description": "End timestamp in UTC epoch seconds"
+          },
+          "color": {
+            "type": "string",
+            "title": "Color",
+            "description": "RGBA color code for chart background tint"
+          },
+          "tooltip": {
+            "type": "string",
+            "title": "Tooltip",
+            "description": "Informational tooltip explaining the split purpose"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "start_time",
+          "end_time",
+          "color",
+          "tooltip"
+        ],
+        "title": "PeriodBand"
+      },
+      "PredictionSignal": {
+        "properties": {
+          "bar_time": {
+            "type": "integer",
+            "title": "Bar Time",
+            "description": "UTC epoch seconds of closed candle"
+          },
+          "bar_timestamp_ny": {
+            "type": "string",
+            "title": "Bar Timestamp Ny",
+            "description": "Candle close in New York time, e.g. '14:35:00 ET'"
+          },
+          "close_price": {
+            "type": "number",
+            "title": "Close Price"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction",
+            "description": "'Up', 'Down', or 'no clear signal'"
+          },
+          "signal_code": {
+            "type": "integer",
+            "title": "Signal Code",
+            "description": "1, -1, or 0"
+          },
+          "confidence_pct": {
+            "type": "number",
+            "title": "Confidence Pct",
+            "description": "Calibrated probability of signaled class in percent"
+          },
+          "conviction": {
+            "type": "number",
+            "title": "Conviction",
+            "description": "Directional conviction: max(P(Down), P(Up))"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold",
+            "description": "Conviction threshold (0.2635)"
+          },
+          "is_gated": {
+            "type": "boolean",
+            "title": "Is Gated",
+            "description": "True if conviction >= threshold"
+          },
+          "probabilities": {
+            "$ref": "#/components/schemas/backend__app__schemas__api_schemas__ProbabilityDistribution"
+          },
+          "locked_at_utc": {
+            "type": "integer",
+            "title": "Locked At Utc",
+            "description": "Timestamp when prediction was locked into append-only log"
+          },
+          "horizon_end_utc": {
+            "type": "integer",
+            "title": "Horizon End Utc",
+            "description": "Timestamp when the 15-minute prediction horizon ends"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          },
+          "reliability_flags": {
+            "items": {
+              "$ref": "#/components/schemas/ReliabilityFlag"
+            },
+            "type": "array",
+            "title": "Reliability Flags"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bar_time",
+          "bar_timestamp_ny",
+          "close_price",
+          "direction",
+          "signal_code",
+          "confidence_pct",
+          "conviction",
+          "threshold",
+          "is_gated",
+          "probabilities",
+          "locked_at_utc",
+          "horizon_end_utc",
+          "model_version",
+          "reliability_flags"
+        ],
+        "title": "PredictionSignal"
+      },
+      "RecencyWeightingMeta": {
+        "properties": {
+          "half_life": {
+            "type": "string",
+            "title": "Half Life"
+          },
+          "decay_rate_alpha": {
+            "type": "number",
+            "title": "Decay Rate Alpha"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "half_life",
+          "decay_rate_alpha",
+          "rationale"
+        ],
+        "title": "RecencyWeightingMeta"
+      },
+      "ReliabilityFlag": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Machine identifier, e.g. 'DATA_STALE', 'BAR_FILLED', 'SESSION_BOUNDARY'"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "User-friendly chip title"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level",
+            "description": "'NORMAL', 'ADVISORY', or 'WARNING'"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Plain-language explanation of reliability impact"
+          },
+          "guide_anchor": {
+            "type": "string",
+            "title": "Guide Anchor",
+            "description": "Anchor link to user guide section"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "level",
+          "message",
+          "guide_anchor"
+        ],
+        "title": "ReliabilityFlag"
+      },
+      "ReplayStartRequest": {
+        "properties": {
+          "session_date": {
+            "type": "string",
+            "title": "Session Date",
+            "description": "YYYY-MM-DD trading session date to replay",
+            "default": "2026-11-06"
+          },
+          "speed_multiplier": {
+            "type": "number",
+            "title": "Speed Multiplier",
+            "description": "Replay playback speed multiplier: 1.0, 5.0, or 20.0",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "title": "ReplayStartRequest"
+      },
+      "ReplayState": {
+        "properties": {
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'STOPPED', 'PLAYING', or 'PAUSED'"
+          },
+          "session_date": {
+            "type": "string",
+            "title": "Session Date"
+          },
+          "current_bar_index": {
+            "type": "integer",
+            "title": "Current Bar Index"
+          },
+          "total_bars": {
+            "type": "integer",
+            "title": "Total Bars"
+          },
+          "speed_multiplier": {
+            "type": "number",
+            "title": "Speed Multiplier"
+          },
+          "current_bar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandleBar"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PredictionSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signals_emitted_count": {
+            "type": "integer",
+            "title": "Signals Emitted Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_active",
+          "status",
+          "session_date",
+          "current_bar_index",
+          "total_bars",
+          "speed_multiplier"
+        ],
+        "title": "ReplayState"
+      },
+      "SignalHistoryResponse": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/SignalPayload"
+            },
+            "type": "array",
+            "title": "Signals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "signals"
+        ],
+        "title": "SignalHistoryResponse"
+      },
+      "SignalLogItem": {
+        "properties": {
+          "signal_id": {
+            "type": "string",
+            "title": "Signal Id"
+          },
+          "bar_time": {
+            "type": "integer",
+            "title": "Bar Time"
+          },
+          "bar_timestamp_ny": {
+            "type": "string",
+            "title": "Bar Timestamp Ny"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "signal_code": {
+            "type": "integer",
+            "title": "Signal Code"
+          },
+          "confidence_pct": {
+            "type": "number",
+            "title": "Confidence Pct"
+          },
+          "conviction": {
+            "type": "number",
+            "title": "Conviction"
+          },
+          "entry_price": {
+            "type": "number",
+            "title": "Entry Price"
+          },
+          "is_gated": {
+            "type": "boolean",
+            "title": "Is Gated"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "signal_id",
+          "bar_time",
+          "bar_timestamp_ny",
+          "direction",
+          "signal_code",
+          "confidence_pct",
+          "conviction",
+          "entry_price",
+          "is_gated",
+          "checksum"
+        ],
+        "title": "SignalLogItem"
+      },
+      "SignalPayload": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "Timestamp of the closed 5-minute candle in New York time"
+          },
+          "close_price": {
+            "type": "number",
+            "title": "Close Price",
+            "description": "Closing price of the candle in USD"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction",
+            "description": "'Up', 'Down', or 'no clear signal'"
+          },
+          "signal_code": {
+            "type": "integer",
+            "title": "Signal Code",
+            "description": "Direction code: 1 (Up), -1 (Down), 0 (Neutral / Gated out)"
+          },
+          "confidence_pct": {
+            "type": "number",
+            "title": "Confidence Pct",
+            "description": "Calibrated confidence percentage (e.g. 68.2)"
+          },
+          "conviction": {
+            "type": "number",
+            "title": "Conviction",
+            "description": "Directional conviction: max(P(Down), P(Up))"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold",
+            "description": "Conviction threshold required for directional signal (0.2635)"
+          },
+          "is_gated": {
+            "type": "boolean",
+            "title": "Is Gated",
+            "description": "True if conviction >= threshold and signal is active"
+          },
+          "probabilities": {
+            "$ref": "#/components/schemas/backend__app__schemas__signal_schemas_final__ProbabilityDistribution"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "description": "Production model version tag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp",
+          "close_price",
+          "direction",
+          "signal_code",
+          "confidence_pct",
+          "conviction",
+          "threshold",
+          "is_gated",
+          "probabilities",
+          "model_version"
+        ],
+        "title": "SignalPayload"
+      },
+      "SignalRuleMeta": {
+        "properties": {
+          "conviction_threshold_tau": {
+            "type": "number",
+            "title": "Conviction Threshold Tau"
+          },
+          "formula": {
+            "type": "string",
+            "title": "Formula"
+          },
+          "expected_signals_per_day": {
+            "type": "number",
+            "title": "Expected Signals Per Day"
+          },
+          "expected_coverage_pct": {
+            "type": "number",
+            "title": "Expected Coverage Pct"
+          },
+          "expected_zero_signal_days_pct": {
+            "type": "number",
+            "title": "Expected Zero Signal Days Pct"
+          },
+          "direction_logic": {
+            "type": "string",
+            "title": "Direction Logic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conviction_threshold_tau",
+          "formula",
+          "expected_signals_per_day",
+          "expected_coverage_pct",
+          "expected_zero_signal_days_pct",
+          "direction_logic"
+        ],
+        "title": "SignalRuleMeta"
+      },
+      "SignalsLogResponse": {
+        "properties": {
+          "session": {
+            "type": "string",
+            "title": "Session"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/SignalLogItem"
+            },
+            "type": "array",
+            "title": "Signals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session",
+          "count",
+          "signals"
+        ],
+        "title": "SignalsLogResponse"
+      },
+      "SplitBoundary": {
+        "properties": {
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "sessions": {
+            "type": "integer",
+            "title": "Sessions"
+          },
+          "valid_bars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Bars"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "title": "SplitBoundary"
+      },
+      "TestMetrics": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "signals_emitted": {
+            "type": "integer",
+            "title": "Signals Emitted"
+          },
+          "signals_per_day": {
+            "type": "number",
+            "title": "Signals Per Day"
+          },
+          "actual_coverage_pct": {
+            "type": "number",
+            "title": "Actual Coverage Pct"
+          },
+          "zero_signal_days_pct": {
+            "type": "number",
+            "title": "Zero Signal Days Pct"
+          },
+          "accuracy": {
+            "type": "number",
+            "title": "Accuracy"
+          },
+          "balanced_accuracy": {
+            "type": "number",
+            "title": "Balanced Accuracy"
+          },
+          "balanced_accuracy_95ci": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Balanced Accuracy 95Ci"
+          },
+          "macro_f1": {
+            "type": "number",
+            "title": "Macro F1"
+          },
+          "macro_f1_95ci": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Macro F1 95Ci"
+          },
+          "binary_sign_accuracy": {
+            "type": "number",
+            "title": "Binary Sign Accuracy"
+          },
+          "binary_sign_accuracy_95ci": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Binary Sign Accuracy 95Ci"
+          },
+          "updown_auc": {
+            "type": "number",
+            "title": "Updown Auc"
+          },
+          "gross_return_bps": {
+            "type": "number",
+            "title": "Gross Return Bps"
+          },
+          "gross_return_95ci": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Gross Return 95Ci"
+          },
+          "net_return_5bp_bps": {
+            "type": "number",
+            "title": "Net Return 5Bp Bps"
+          },
+          "net_return_8bp_bps": {
+            "type": "number",
+            "title": "Net Return 8Bp Bps"
+          },
+          "net_return_8bp_95ci": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Net Return 8Bp 95Ci"
+          },
+          "net_return_12bp_bps": {
+            "type": "number",
+            "title": "Net Return 12Bp Bps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "signals_emitted",
+          "signals_per_day",
+          "actual_coverage_pct",
+          "zero_signal_days_pct",
+          "accuracy",
+          "balanced_accuracy",
+          "balanced_accuracy_95ci",
+          "macro_f1",
+          "macro_f1_95ci",
+          "binary_sign_accuracy",
+          "binary_sign_accuracy_95ci",
+          "updown_auc",
+          "gross_return_bps",
+          "gross_return_95ci",
+          "net_return_5bp_bps",
+          "net_return_8bp_bps",
+          "net_return_8bp_95ci",
+          "net_return_12bp_bps"
+        ],
+        "title": "TestMetrics"
+      },
+      "TestNowResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'SUCCESS', 'ALREADY_STORED', or 'MARKET_CLOSED'"
+          },
+          "signal": {
+            "$ref": "#/components/schemas/PredictionSignal"
+          },
+          "latest_closed_bar": {
+            "$ref": "#/components/schemas/CandleBar"
+          },
+          "forming_bar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandleBar"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Muted still-forming live bar (no signal attached)"
+          },
+          "recent_bars": {
+            "items": {
+              "$ref": "#/components/schemas/CandleBar"
+            },
+            "type": "array",
+            "title": "Recent Bars",
+            "description": "Last 150-200 closed candles for live chart view"
+          },
+          "market_status": {
+            "$ref": "#/components/schemas/MarketStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "signal",
+          "latest_closed_bar",
+          "recent_bars",
+          "market_status"
+        ],
+        "title": "TestNowResponse"
+      },
+      "TrainingDateRange": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "title": "End Date"
+          },
+          "total_sessions": {
+            "type": "integer",
+            "title": "Total Sessions"
+          },
+          "total_raw_bars": {
+            "type": "integer",
+            "title": "Total Raw Bars"
+          },
+          "valid_training_rows": {
+            "type": "integer",
+            "title": "Valid Training Rows"
+          },
+          "dropped_eod_bars": {
+            "type": "integer",
+            "title": "Dropped Eod Bars"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date",
+          "total_sessions",
+          "total_raw_bars",
+          "valid_training_rows",
+          "dropped_eod_bars"
+        ],
+        "title": "TrainingDateRange"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ValidationMetrics": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "accuracy": {
+            "type": "number",
+            "title": "Accuracy"
+          },
+          "balanced_accuracy": {
+            "type": "number",
+            "title": "Balanced Accuracy"
+          },
+          "macro_f1": {
+            "type": "number",
+            "title": "Macro F1"
+          },
+          "binary_sign_accuracy": {
+            "type": "number",
+            "title": "Binary Sign Accuracy"
+          },
+          "updown_auc": {
+            "type": "number",
+            "title": "Updown Auc"
+          },
+          "gross_return_bps": {
+            "type": "number",
+            "title": "Gross Return Bps"
+          },
+          "net_return_8bp_bps": {
+            "type": "number",
+            "title": "Net Return 8Bp Bps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "accuracy",
+          "balanced_accuracy",
+          "macro_f1",
+          "binary_sign_accuracy",
+          "updown_auc",
+          "gross_return_bps",
+          "net_return_8bp_bps"
+        ],
+        "title": "ValidationMetrics"
+      },
+      "backend__app__schemas__api_schemas__ProbabilityDistribution": {
+        "properties": {
+          "down": {
+            "type": "number",
+            "title": "Down"
+          },
+          "neutral": {
+            "type": "number",
+            "title": "Neutral"
+          },
+          "up": {
+            "type": "number",
+            "title": "Up"
+          }
+        },
+        "type": "object",
+        "required": [
+          "down",
+          "neutral",
+          "up"
+        ],
+        "title": "ProbabilityDistribution"
+      },
+      "backend__app__schemas__signal_schemas_final__ProbabilityDistribution": {
+        "properties": {
+          "down": {
+            "type": "number",
+            "title": "Down",
+            "description": "Calibrated probability of Down move (<= -15 bps)"
+          },
+          "neutral": {
+            "type": "number",
+            "title": "Neutral",
+            "description": "Calibrated probability of Neutral move (< 15 bps)"
+          },
+          "up": {
+            "type": "number",
+            "title": "Up",
+            "description": "Calibrated probability of Up move (>= +15 bps)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "down",
+          "neutral",
+          "up"
+        ],
+        "title": "ProbabilityDistribution"
+      }
+    }
+  }
+}

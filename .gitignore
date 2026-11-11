@@ -24,6 +24,7 @@ artifacts/*
 
 # IDE
 .vscode/
+.matplotlib_cache/
 
 # OS
 .DS_Store
