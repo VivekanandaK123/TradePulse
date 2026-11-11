@@ -1,6 +1,5 @@
 """
 TradePulse - Step 10: Confidence Gating, Signal Rules & Non-Overlapping Backtesting
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Implements the production signal rule and realistic simulation:
 1. apply_confidence_gating: Directional signal if max(P_up, P_down) >= tau and is highest class; else 0 (No clear signal).

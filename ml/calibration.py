@@ -1,6 +1,5 @@
 """
 TradePulse - Step 9: Probability Calibration & Reliability Analysis
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Implements rigorous out-of-fold calibration:
 1. generate_purged_oof_probabilities: Generates out-of-fold predictions on training data using purged walk-forward CV.
@@ -235,4 +234,3 @@ def create_ensemble_probabilities(probs_a: np.ndarray, probs_b: np.ndarray, weig
     ens = (weight_a * probs_a) + ((1.0 - weight_a) * probs_b)
     # Ensure rows sum to 1
     return ens / ens.sum(axis=1, keepdims=True)
-

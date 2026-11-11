@@ -1,6 +1,5 @@
 """
 TradePulse - Step 9 & 10: Model Diagnostics & Statistical Analysis
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Implements rigorous diagnostic tools for short-term financial time series:
 1. TimeOfDayBaseline: Intraday 30-minute regime baseline (measures time-of-day heuristic bias).

@@ -32,6 +32,12 @@ from ml.gating import (
     simulate_non_overlapping_trades,
     check_filled_sensitivity,
 )
+from ml.label_expansion_experiments import (
+    compute_binary_sign_accuracy,
+    compute_directional_conviction,
+    apply_fixed_coverage_signals,
+    compute_up_down_roc_auc,
+)
 
 
 class TestDiagnosticsAndCalibration(unittest.TestCase):
@@ -109,6 +115,54 @@ class TestDiagnosticsAndCalibration(unittest.TestCase):
         sim = simulate_non_overlapping_trades(df_sim, signals_45, horizon_bars=2, cost_bps=0.0008)
         self.assertGreaterEqual(sim["n_trades"], 1)
         self.assertIn("max_drawdown_pct", sim)
+
+    def test_binary_sign_accuracy(self):
+        y_true = np.array([1, -1, 0, 1, -1, 0])
+        # Model probabilities: [P(Down), P(Neutral), P(Up)]
+        probs = np.array([
+            [0.2, 0.3, 0.5],  # Pred Up (match y=1)
+            [0.6, 0.2, 0.2],  # Pred Down (match y=-1)
+            [0.3, 0.4, 0.3],  # Neutral bar (ignored in binary sign acc)
+            [0.6, 0.1, 0.3],  # Pred Down (mismatch y=1)
+            [0.4, 0.3, 0.3],  # Pred Down (match y=-1)
+            [0.1, 0.8, 0.1],  # Neutral bar (ignored)
+        ])
+        res = compute_binary_sign_accuracy(y_true, probs)
+        self.assertEqual(res["n_dir"], 4)
+        # Matches: bar 0 (Up==Up), bar 1 (Down==Down), bar 3 (Down!=Up), bar 4 (Down==Down) -> 3/4 = 75.0%
+        self.assertEqual(res["sign_acc"], 75.0)
+        self.assertIn("ci_low", res)
+        self.assertIn("ci_high", res)
+
+    def test_directional_conviction_and_fixed_coverage(self):
+        probs = np.array([
+            [0.55, 0.15, 0.30],  # Conviction 0.55 (Down)
+            [0.20, 0.60, 0.20],  # Conviction 0.20
+            [0.10, 0.20, 0.70],  # Conviction 0.70 (Up)
+            [0.35, 0.30, 0.35],  # Conviction 0.35
+        ])
+        conv = compute_directional_conviction(probs)
+        np.testing.assert_allclose(conv, [0.55, 0.20, 0.70, 0.35])
+
+        # Top 50% fraction (top 2 out of 4: rows 2 and 0)
+        signals, cutoff = apply_fixed_coverage_signals(probs, top_fraction=0.50)
+        self.assertEqual(signals[2], 1)   # Up
+        self.assertEqual(signals[0], -1)  # Down
+        self.assertEqual(signals[1], 0)   # Neutral / ungated
+        self.assertEqual(signals[3], 0)   # Ungated
+
+    def test_up_down_roc_auc(self):
+        y_true = np.array([1, -1, 1, -1, 0])
+        probs = np.array([
+            [0.1, 0.1, 0.8],
+            [0.8, 0.1, 0.1],
+            [0.2, 0.1, 0.7],
+            [0.7, 0.1, 0.2],
+            [0.3, 0.4, 0.3],
+        ])
+        auc = compute_up_down_roc_auc(y_true, probs)
+        self.assertIsNotNone(auc)
+        self.assertEqual(auc, 1.0)
 
 
 if __name__ == "__main__":
