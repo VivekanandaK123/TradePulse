@@ -44,6 +44,15 @@ export async function callTestNow(): Promise<TestNowResponse> {
   return res.json();
 }
 
+export async function clearLiveSession(): Promise<{ status: string; live_since_epoch: number }> {
+  const res = await fetch(`${BASE_URL}/live/clear`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Clear live session failed: ${res.statusText}`);
+  return res.json();
+}
+
 export async function fetchSignalsLog(session?: string): Promise<SignalsLogResponse> {
   const url = session ? `${BASE_URL}/signals?session=${encodeURIComponent(session)}` : `${BASE_URL}/signals`;
   const res = await fetch(url);

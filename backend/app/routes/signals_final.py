@@ -1,6 +1,5 @@
 """
 TradePulse - Step 14 Final: Live Signal REST Endpoints
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Exposes FastAPI routes:
 - GET /api/v1/signals/latest: latest candle's signal, confidence, timestamp.

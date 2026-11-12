@@ -5,6 +5,7 @@ import {
   fetchHistory, 
   fetchOOFSignals, 
   callTestNow, 
+  clearLiveSession,
   fetchSignalsLog, 
   fetchOutcomes,
   startReplay,
@@ -179,6 +180,48 @@ export const App: React.FC = () => {
     }
   };
 
+  // Clear all live/demo testing outputs to starting empty state
+  const handleClear = async () => {
+    setIsAutoMode(false);
+    setRecentBars([]);
+    setFormingBar(undefined);
+    setLatestSignal(undefined);
+    setSignalsLog({ session: replayState.is_active ? 'replay' : getTodayEtDate(), count: 0, signals: [] });
+    setOutcomes({ count: 0, outcomes: [] });
+    setErrorMessage(null);
+
+    if (replayState.is_active) {
+      try {
+        await pauseReplay();
+      } catch {}
+      setReplayState((prev) => ({
+        ...prev,
+        status: 'STOPPED',
+        current_bar_index: 0,
+        signals_emitted_count: 0,
+        current_bar: undefined,
+        current_signal: undefined,
+      }));
+    } else {
+      try {
+        await clearLiveSession();
+      } catch (err: any) {
+        console.error('Failed to clear live session baseline:', err);
+      }
+    }
+  };
+
+  // Toggle Auto Mode: when turning ON, start fresh from the next closing candle
+  const handleToggleAutoMode = async () => {
+    if (!isLiveTradingEnabled) return;
+    if (!isAutoMode) {
+      await handleClear();
+      setIsAutoMode(true);
+    } else {
+      setIsAutoMode(false);
+    }
+  };
+
   // 2. Test Now Trigger
   const handleTestNow = async () => {
     if (!isLiveTradingEnabled) return;
@@ -186,8 +229,8 @@ export const App: React.FC = () => {
     setErrorMessage(null);
     try {
       const res = await callTestNow();
-      setLatestSignal(res.signal);
-      setRecentBars(res.recent_bars);
+      setLatestSignal(res.signal ?? undefined);
+      setRecentBars(res.recent_bars ?? []);
       setFormingBar(res.forming_bar);
 
       // Refresh signals log and outcomes for today's live session
@@ -214,8 +257,8 @@ export const App: React.FC = () => {
         try {
           const payload = JSON.parse(event.data);
           if (payload.data) {
-            setLatestSignal(payload.data.signal);
-            setRecentBars(payload.data.recent_bars);
+            setLatestSignal(payload.data.signal ?? undefined);
+            setRecentBars(payload.data.recent_bars ?? []);
             setFormingBar(payload.data.forming_bar);
             const todayEt = getTodayEtDate();
             const [sigs, outs] = await Promise.all([fetchSignalsLog(todayEt), fetchOutcomes()]);
@@ -375,7 +418,7 @@ export const App: React.FC = () => {
       } else if (e.key === 'a' || e.key === 'A') {
         if (!isLiveTradingEnabled) return;
         e.preventDefault();
-        setIsAutoMode((prev) => !prev);
+        handleToggleAutoMode();
       } else if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         handleToggleReplayMode();
@@ -476,10 +519,9 @@ export const App: React.FC = () => {
               latestSignal={latestSignal}
               marketStatus={health?.market_status}
               isAutoMode={isAutoMode}
-              onToggleAutoMode={() => {
-                if (isLiveTradingEnabled) setIsAutoMode(!isAutoMode);
-              }}
+              onToggleAutoMode={handleToggleAutoMode}
               onTestNow={handleTestNow}
+              onClear={handleClear}
               isTestingNow={isTestingNow}
               timeZone={timeZone}
               secondsToNextClose={secondsToNextClose}

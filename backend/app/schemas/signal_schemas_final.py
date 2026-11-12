@@ -1,6 +1,5 @@
 """
 TradePulse - Step 14 Final: Pydantic Schemas for Live Signal API
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 """
 
 from typing import Dict, List, Optional, Any

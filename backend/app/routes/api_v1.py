@@ -1,6 +1,5 @@
 """
 TradePulse - REST & Streaming API Router (Phase 0 API Contract)
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Strict adherence to Product Definition (Sections 3-9):
 - All timestamps in UTC epoch seconds.
@@ -100,6 +99,16 @@ def test_now():
     """
     service = get_mock_service()
     return service.test_now()
+
+
+@router.post("/live/clear", summary="Clear Live Session View & Set New Baseline")
+def clear_live():
+    """
+    Sets the live session baseline to the current timestamp so only candles closing
+    after this moment are displayed, logged, and scored.
+    """
+    service = get_mock_service()
+    return service.clear_live_session()
 
 
 @router.get("/live/stream", summary="Server-Sent Events (SSE) Live Bar & Signal Stream")

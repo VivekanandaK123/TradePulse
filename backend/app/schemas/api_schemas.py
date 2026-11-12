@@ -1,6 +1,5 @@
 """
 TradePulse - Production API Pydantic Schemas (FastAPI & React Trader Interface)
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Strict Contract Rules:
 - All timestamps exposed to the frontend are UTC epoch seconds (int).
@@ -245,11 +244,11 @@ class PredictionSignal(BaseModel):
 
 
 class TestNowResponse(BaseModel):
-    status: str = Field(..., description="'SUCCESS', 'ALREADY_STORED', or 'MARKET_CLOSED'")
-    signal: PredictionSignal
-    latest_closed_bar: CandleBar
+    status: str = Field(..., description="'SUCCESS', 'ALREADY_STORED', 'WAITING_NEXT_BAR', or 'MARKET_CLOSED'")
+    signal: Optional[PredictionSignal] = None
+    latest_closed_bar: Optional[CandleBar] = None
     forming_bar: Optional[CandleBar] = Field(None, description="Muted still-forming live bar (no signal attached)")
-    recent_bars: List[CandleBar] = Field(..., description="Last 150-200 closed candles for live chart view")
+    recent_bars: List[CandleBar] = Field(..., description="Closed candles for live chart view")
     market_status: MarketStatus
 
 

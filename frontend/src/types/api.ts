@@ -112,9 +112,9 @@ export interface PredictionSignal {
 }
 
 export interface TestNowResponse {
-  status: 'SUCCESS' | 'ALREADY_STORED' | 'MARKET_CLOSED';
-  signal: PredictionSignal;
-  latest_closed_bar: CandleBar;
+  status: 'SUCCESS' | 'ALREADY_STORED' | 'WAITING_NEXT_BAR' | 'MARKET_CLOSED';
+  signal?: PredictionSignal;
+  latest_closed_bar?: CandleBar;
   forming_bar?: CandleBar;
   recent_bars: CandleBar[];
   market_status: MarketStatus;

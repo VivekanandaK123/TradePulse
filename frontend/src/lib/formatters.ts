@@ -64,3 +64,49 @@ export function formatPct(val: number): string {
   return `${val.toFixed(1)}%`;
 }
 
+export function formatChartTick(
+  time: any,
+  tickMarkType: number,
+  tz: TimeZoneMode = 'ET'
+): string {
+  const epoch = typeof time === 'number' ? time : (time?.timestamp ?? Number(time));
+  if (!epoch || isNaN(epoch)) return '';
+  const date = new Date(epoch * 1000);
+  const timeZone = tz === 'ET' ? 'America/New_York' : undefined;
+
+  // TickMarkType: Year=0, Month=1, DayOfMonth=2, Time=3, TimeWithSeconds=4
+  if (tickMarkType === 0) {
+    return new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(date);
+  }
+  if (tickMarkType === 1) {
+    return new Intl.DateTimeFormat('en-US', { timeZone, month: 'short' }).format(date);
+  }
+  if (tickMarkType === 2) {
+    return new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric' }).format(date);
+  }
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+export function formatChartTime(
+  time: any,
+  tz: TimeZoneMode = 'ET'
+): string {
+  const epoch = typeof time === 'number' ? time : (time?.timestamp ?? Number(time));
+  if (!epoch || isNaN(epoch)) return '';
+  const date = new Date(epoch * 1000);
+  const timeZone = tz === 'ET' ? 'America/New_York' : undefined;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+

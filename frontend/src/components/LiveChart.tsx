@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, UTCTimestamp } from 'lightweight-charts';
 import { CandleBar, PredictionSignal, MarketStatus } from '../types/api';
-import { TimeZoneMode, formatPrice, formatDateWithTime, formatCountdown } from '../lib/formatters';
-import { Zap, Play, Pause, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
+import { TimeZoneMode, formatPrice, formatDateWithTime, formatCountdown, formatChartTick, formatChartTime } from '../lib/formatters';
+import { Zap, Play, Pause, AlertTriangle, Clock, RefreshCw, Trash2 } from 'lucide-react';
 
 interface LiveChartProps {
   recentBars: CandleBar[];
@@ -12,6 +12,7 @@ interface LiveChartProps {
   isAutoMode: boolean;
   onToggleAutoMode: () => void;
   onTestNow: () => void;
+  onClear: () => void;
   isTestingNow: boolean;
   timeZone: TimeZoneMode;
   secondsToNextClose?: number;
@@ -26,6 +27,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   isAutoMode,
   onToggleAutoMode,
   onTestNow,
+  onClear,
   isTestingNow,
   timeZone,
   secondsToNextClose = 180,
@@ -59,10 +61,14 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         vertLine: { color: '#3b82f6', width: 1, style: 2 },
         horzLine: { color: '#3b82f6', width: 1, style: 2 },
       },
+      localization: {
+        timeFormatter: (t: any) => formatChartTime(t, timeZone),
+      },
       timeScale: {
         borderColor: '#334155',
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (t: any, markType: any) => formatChartTick(t, markType, timeZone),
       },
     });
 
@@ -124,7 +130,15 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
   // Update Data and Markers
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current || recentBars.length === 0) return;
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+
+    if (recentBars.length === 0 && !formingBar) {
+      candleSeriesRef.current.setData([]);
+      volumeSeriesRef.current.setData([]);
+      candleSeriesRef.current.setMarkers([]);
+      setHoveredCandle(null);
+      return;
+    }
 
     const candleData: CandlestickData[] = [];
     const volumeData: HistogramData[] = [];
@@ -205,6 +219,19 @@ export const LiveChart: React.FC<LiveChartProps> = ({
     chartRef.current?.timeScale().fitContent();
   }, [recentBars, formingBar, latestSignal]);
 
+  // Update Timezone formatting
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartRef.current.applyOptions({
+      localization: {
+        timeFormatter: (t: any) => formatChartTime(t, timeZone),
+      },
+      timeScale: {
+        tickMarkFormatter: (t: any, markType: any) => formatChartTick(t, markType, timeZone),
+      },
+    });
+  }, [timeZone]);
+
   return (
     <div className={`bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-2.5 transition-opacity ${
       !isSectionEnabled ? 'opacity-65' : ''
@@ -228,6 +255,16 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
         {/* Primary Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Clear Button */}
+          <button
+            onClick={onClear}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border bg-slate-800 text-slate-300 border-slate-700 hover:bg-rose-950/60 hover:text-rose-200 hover:border-rose-800/70 transition"
+            title="Clear live chart, predicted direction, audit log, and scoreboard before starting a new test"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>Clear</span>
+          </button>
+
           {/* Auto Mode Toggle */}
           <button
             onClick={onToggleAutoMode}

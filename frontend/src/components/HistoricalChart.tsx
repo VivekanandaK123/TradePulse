@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, LineData, UTCTimestamp } from 'lightweight-charts';
 import { CandleBar, PeriodBand, OOFSignalItem } from '../types/api';
-import { TimeZoneMode, formatPrice, formatDateWithTime } from '../lib/formatters';
+import { TimeZoneMode, formatPrice, formatDateWithTime, formatChartTick, formatChartTime } from '../lib/formatters';
 import { Layers, Eye, Info } from 'lucide-react';
 
 interface HistoricalChartProps {
@@ -54,10 +54,14 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
         vertLine: { color: '#475569', width: 1, style: 2 },
         horzLine: { color: '#475569', width: 1, style: 2 },
       },
+      localization: {
+        timeFormatter: (t: any) => formatChartTime(t, timeZone),
+      },
       timeScale: {
         borderColor: '#334155',
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (t: any, markType: any) => formatChartTick(t, markType, timeZone),
       },
     });
 
@@ -198,6 +202,19 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
   useEffect(() => {
     volumeSeriesRef.current?.applyOptions({ visible: showVolume });
   }, [showVolume]);
+
+  // Update Timezone formatting
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartRef.current.applyOptions({
+      localization: {
+        timeFormatter: (t: any) => formatChartTime(t, timeZone),
+      },
+      timeScale: {
+        tickMarkFormatter: (t: any, markType: any) => formatChartTick(t, markType, timeZone),
+      },
+    });
+  }, [timeZone]);
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-2">

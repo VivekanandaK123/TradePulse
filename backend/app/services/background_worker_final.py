@@ -1,6 +1,5 @@
 """
 TradePulse - Step 15 Final: Production Background Candle Close Worker
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Background scheduler that runs during US market hours (09:30 - 16:00 ET):
 1. Wakes precisely 3-5 seconds after each 5-minute boundary (:00, :05, :10, :15, ...).
@@ -106,31 +105,43 @@ class BackgroundWorkerFinal:
 
                 client = StockHistoricalDataClient(self.service.alpaca_key, self.service.alpaca_secret)
                 now_utc = datetime.now(timezone.utc)
-                start_utc = now_utc - timedelta(minutes=25)
+                current_bucket = now_utc.replace(minute=(now_utc.minute // 5) * 5, second=0, microsecond=0)
+                start_utc = now_utc - timedelta(minutes=30)
 
                 req = StockBarsRequest(
                     symbol_or_symbols=self.service.symbol,
                     timeframe=TimeFrame(5, TimeFrameUnit.Minute),
                     start=start_utc,
-                    end=now_utc - timedelta(minutes=15), # IEX free delay buffer
+                    end=now_utc,
                     feed=DataFeed.IEX,
                     adjustment=Adjustment.RAW,
                 )
                 bars = client.get_stock_bars(req)
-                if bars[self.service.symbol]:
-                    last_bar = bars[self.service.symbol][-1]
-                    bar_dict = {
-                        "timestamp": last_bar.timestamp.isoformat(),
-                        "open": float(last_bar.open),
-                        "high": float(last_bar.high),
-                        "low": float(last_bar.low),
-                        "close": float(last_bar.close),
-                        "volume": float(last_bar.volume),
-                        "trade_count": float(getattr(last_bar, "trade_count", 0)),
-                        "vwap": float(getattr(last_bar, "vwap", last_bar.close)),
-                        "is_filled": 0,
-                    }
-                    self.service.process_closed_bar(bar_dict)
+                raw_list = bars[self.service.symbol] if self.service.symbol in bars.data else []
+                closed_bars = [b for b in raw_list if b.timestamp < current_bucket]
+                if closed_bars:
+                    last_bar = closed_bars[-1]
+                    last_buf_ts = None
+                    if self.service.candles_buffer:
+                        import pandas as pd
+                        last_buf_ts = pd.to_datetime(self.service.candles_buffer[-1]["timestamp"], utc=True)
+                    if last_buf_ts is None or last_bar.timestamp > last_buf_ts:
+                        from zoneinfo import ZoneInfo
+                        ny_tz = ZoneInfo("America/New_York")
+                        bar_dict = {
+                            "timestamp": str(last_bar.timestamp),
+                            "timestamp_ny": str(last_bar.timestamp.astimezone(ny_tz)),
+                            "session_date": str(last_bar.timestamp.astimezone(ny_tz).date()),
+                            "open": float(last_bar.open),
+                            "high": float(last_bar.high),
+                            "low": float(last_bar.low),
+                            "close": float(last_bar.close),
+                            "volume": float(last_bar.volume),
+                            "trade_count": float(getattr(last_bar, "trade_count", 0)),
+                            "vwap": float(getattr(last_bar, "vwap", last_bar.close)),
+                            "is_filled": 0,
+                        }
+                        self.service.process_closed_bar(bar_dict)
             else:
                 # Historical / local fallback mode
                 clean_path = PROJECT_ROOT / "data" / "processed" / "META_5min_clean.csv"

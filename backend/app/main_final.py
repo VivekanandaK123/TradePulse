@@ -1,6 +1,5 @@
 """
 TradePulse - Step 14 Final: FastAPI Application Server
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Main backend entrypoint for live inference server.
 """

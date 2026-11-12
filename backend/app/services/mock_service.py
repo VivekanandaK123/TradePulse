@@ -1,6 +1,5 @@
 """
 TradePulse - Mock Backend Service (Phase 0 API Contract Delivery)
-Author: TradePulse Team (IIT Patna, IMPACT Lab)
 
 Provides high-fidelity mock implementations of all required endpoints:
 - Uses real ui_summary_final.json, split_config.json, and META_5min_clean.csv data.
@@ -43,7 +42,7 @@ from backend.app.schemas.api_schemas import (
     ReplayState,
 )
 from backend.app.services.market_calendar import get_current_market_status
-from backend.app.services.live_inference_final import LiveInferenceServiceFinal
+from backend.app.services.live_inference_final import LiveInferenceServiceFinal, get_live_service_final
 
 DATA_DIR = PROJECT_ROOT / "data"
 METADATA_DIR = PROJECT_ROOT / "artifacts" / "metadata"
@@ -116,6 +115,7 @@ class MockBackendService:
         self.symbol = "META"
         self.feed_name = "Alpaca IEX, 5-min"
         self.model_version = "TradePulse-v1.0-final (b57ee06e)"
+        self.live_since_epoch: Optional[int] = None
 
         # Replay mock state
         self.replay_state = ReplayState(
@@ -291,9 +291,244 @@ class MockBackendService:
             note="Out-of-fold, historical, not live results.",
         )
 
+    def _build_live_test_now(self, market_status: MarketStatus) -> Optional[TestNowResponse]:
+        """
+        Fetches latest live Alpaca IEX bars during trading hours, evaluates any
+        newly closed 5-minute bar idempotently via LiveInferenceServiceFinal,
+        and returns the real live TestNowResponse. Returns None on offline/error.
+        """
+        live_svc = get_live_service_final()
+        if not live_svc.alpaca_key or not live_svc.alpaca_secret:
+            return None
+
+        try:
+            from alpaca.data.historical import StockHistoricalDataClient
+            from alpaca.data.requests import StockBarsRequest
+            from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+            from alpaca.data.enums import DataFeed, Adjustment
+            from zoneinfo import ZoneInfo
+
+            # Ensure buffer has >= 35 warm-up bars
+            if len(live_svc.candles_buffer) < 35:
+                hist_df = _get_clean_df()
+                live_svc.seed_buffer_from_history(hist_df.tail(200))
+
+            client = StockHistoricalDataClient(live_svc.alpaca_key, live_svc.alpaca_secret)
+            now_utc = datetime.now(timezone.utc)
+            current_bucket = now_utc.replace(minute=(now_utc.minute // 5) * 5, second=0, microsecond=0)
+            ny_tz = ZoneInfo("America/New_York")
+
+            req = StockBarsRequest(
+                symbol_or_symbols=live_svc.symbol,
+                timeframe=TimeFrame(5, TimeFrameUnit.Minute),
+                start=now_utc - timedelta(days=5),
+                end=now_utc,
+                feed=DataFeed.IEX,
+                adjustment=Adjustment.RAW,
+            )
+            bars_resp = client.get_stock_bars(req)
+            raw_list = bars_resp[live_svc.symbol] if live_svc.symbol in bars_resp.data else []
+            if not raw_list:
+                return None
+
+            # Filter to regular NASDAQ trading hours (09:30 - 15:55 ET)
+            rth_bars = []
+            for b in raw_list:
+                ny_t = b.timestamp.astimezone(ny_tz).time()
+                if (ny_t.hour > 9 or (ny_t.hour == 9 and ny_t.minute >= 30)) and ny_t.hour < 16:
+                    rth_bars.append(b)
+
+            closed_bars = [b for b in rth_bars if b.timestamp < current_bucket]
+            forming_candidates = [b for b in rth_bars if b.timestamp >= current_bucket]
+
+            if not closed_bars:
+                return None
+
+            today_ny = now_utc.astimezone(ny_tz).date()
+            last_buf_ts = (
+                pd.to_datetime(live_svc.candles_buffer[-1]["timestamp"], utc=True)
+                if live_svc.candles_buffer
+                else None
+            )
+
+            # Seed prior bars (and any bars closed before live_since_epoch) into buffer without emitting live signals
+            warmup_dicts = []
+            today_bars = []
+            for b in closed_bars:
+                if last_buf_ts is not None and b.timestamp <= last_buf_ts:
+                    continue
+                b_ny_date = b.timestamp.astimezone(ny_tz).date()
+                bar_close_epoch = int(b.timestamp.timestamp()) + 300
+                is_before_clear = self.live_since_epoch is not None and bar_close_epoch <= self.live_since_epoch
+                if b_ny_date < today_ny or is_before_clear:
+                    warmup_dicts.append({
+                        "timestamp": str(b.timestamp),
+                        "timestamp_ny": str(b.timestamp.astimezone(ny_tz)),
+                        "session_date": str(b.timestamp.astimezone(ny_tz).date()),
+                        "open": float(b.open),
+                        "high": float(b.high),
+                        "low": float(b.low),
+                        "close": float(b.close),
+                        "volume": float(b.volume),
+                        "trade_count": float(getattr(b, "trade_count", 0)),
+                        "vwap": float(getattr(b, "vwap", b.close)),
+                        "is_filled": 0,
+                    })
+                else:
+                    today_bars.append(b)
+
+            if warmup_dicts:
+                with live_svc.lock:
+                    live_svc.candles_buffer.extend(warmup_dicts)
+                    if len(live_svc.candles_buffer) > live_svc.buffer_capacity:
+                        live_svc.candles_buffer = live_svc.candles_buffer[-live_svc.buffer_capacity:]
+
+            # Process today's new closed bars chronologically (idempotent by timestamp)
+            for b in today_bars:
+                bar_dict = {
+                    "timestamp": str(b.timestamp),
+                    "timestamp_ny": str(b.timestamp.astimezone(ny_tz)),
+                    "session_date": str(b.timestamp.astimezone(ny_tz).date()),
+                    "open": float(b.open),
+                    "high": float(b.high),
+                    "low": float(b.low),
+                    "close": float(b.close),
+                    "volume": float(b.volume),
+                    "trade_count": float(getattr(b, "trade_count", 0)),
+                    "vwap": float(getattr(b, "vwap", b.close)),
+                    "is_filled": 0,
+                }
+                live_svc.process_closed_bar(bar_dict)
+
+            forming_bar: Optional[CandleBar] = None
+            if forming_candidates:
+                fb = forming_candidates[-1]
+                forming_bar = CandleBar(
+                    time=int(fb.timestamp.timestamp()),
+                    open=round(float(fb.open), 2),
+                    high=round(float(fb.high), 2),
+                    low=round(float(fb.low), 2),
+                    close=round(float(fb.close), 2),
+                    volume=round(float(fb.volume), 0),
+                    vwap=round(float(getattr(fb, "vwap", fb.close)), 2),
+                    is_filled=False,
+                )
+
+            # Build recent_bars from live buffer (filtered by live_since_epoch if cleared)
+            buf_tail = live_svc.candles_buffer[-150:]
+            recent_bars: List[CandleBar] = []
+            for r in buf_tail:
+                t_sec = int(pd.to_datetime(r["timestamp"], utc=True).timestamp())
+                if self.live_since_epoch is not None and (t_sec + 300) <= self.live_since_epoch:
+                    continue
+                recent_bars.append(
+                    CandleBar(
+                        time=t_sec,
+                        open=round(float(r["open"]), 2),
+                        high=round(float(r["high"]), 2),
+                        low=round(float(r["low"]), 2),
+                        close=round(float(r["close"]), 2),
+                        volume=round(float(r["volume"]), 0),
+                        vwap=round(float(r.get("vwap", r["close"])), 2),
+                        is_filled=bool(r.get("is_filled", 0) == 1),
+                    )
+                )
+
+            latest_sig = live_svc.get_latest_signal()
+            if self.live_since_epoch is not None:
+                if not recent_bars:
+                    return TestNowResponse(
+                        status="WAITING_NEXT_BAR",
+                        signal=None,
+                        latest_closed_bar=None,
+                        forming_bar=forming_bar,
+                        recent_bars=[],
+                        market_status=market_status,
+                    )
+                if latest_sig:
+                    sig_t = int(pd.to_datetime(latest_sig["timestamp"], utc=True).timestamp())
+                    if (sig_t + 300) <= self.live_since_epoch:
+                        latest_sig = None
+
+            if not latest_sig or not recent_bars:
+                return None
+
+            latest_closed_bar = recent_bars[-1]
+
+            sig_ts = int(pd.to_datetime(latest_sig["timestamp"], utc=True).timestamp())
+            sig_ny = pd.to_datetime(latest_sig["timestamp"], utc=True).tz_convert("America/New_York")
+            is_boundary = (sig_ny.hour == 9 and sig_ny.minute < 45) or (sig_ny.hour == 15 and sig_ny.minute >= 45)
+
+            reliability_flags = [
+                ReliabilityFlag(
+                    id="SESSION_BOUNDARY",
+                    name="Opening / Closing Regime" if is_boundary else "Mid-Session Activity",
+                    level="ADVISORY" if is_boundary else "NORMAL",
+                    message=(
+                        "Candle is inside opening (09:30-09:45) or closing (15:45-16:00) high-volatility regime."
+                        if is_boundary
+                        else "Candle is outside opening (09:30-09:45) and closing (15:45-16:00) volatility regimes."
+                    ),
+                    guide_anchor="session-boundaries",
+                ),
+                ReliabilityFlag(
+                    id="DATA_FRESHNESS",
+                    name="Live Alpaca IEX Feed",
+                    level="NORMAL",
+                    message="Evaluated on live closed Alpaca IEX 5-minute bar.",
+                    guide_anchor="stale-data",
+                ),
+                ReliabilityFlag(
+                    id="CONVICTION_GATING",
+                    name="Conviction Evaluated",
+                    level="NORMAL" if latest_sig["is_gated"] else "ADVISORY",
+                    message=(
+                        f"Conviction ({latest_sig['conviction']:.4f}) exceeds threshold τ = {latest_sig['threshold']:.4f}."
+                        if latest_sig["is_gated"]
+                        else f"Conviction ({latest_sig['conviction']:.4f}) is below threshold τ = {latest_sig['threshold']:.4f}."
+                    ),
+                    guide_anchor="conviction-gating",
+                ),
+            ]
+
+            signal = PredictionSignal(
+                bar_time=sig_ts,
+                bar_timestamp_ny=str(latest_sig["timestamp"]),
+                close_price=round(float(latest_sig["close_price"]), 2),
+                direction=latest_sig["direction"],
+                signal_code=int(latest_sig["signal_code"]),
+                confidence_pct=float(latest_sig["confidence_pct"]),
+                conviction=float(latest_sig["conviction"]),
+                threshold=float(latest_sig["threshold"]),
+                is_gated=bool(latest_sig["is_gated"]),
+                probabilities=ProbabilityDistribution(**latest_sig["probabilities"]),
+                locked_at_utc=int(time.time()),
+                horizon_end_utc=sig_ts + 900,
+                model_version=latest_sig.get("model_version", self.model_version),
+                reliability_flags=reliability_flags,
+                outcome=None,
+            )
+
+            return TestNowResponse(
+                status="SUCCESS",
+                signal=signal,
+                latest_closed_bar=latest_closed_bar,
+                forming_bar=forming_bar,
+                recent_bars=recent_bars,
+                market_status=market_status,
+            )
+        except Exception as e:
+            print(f"[LIVE TEST NOW ERROR] Falling back to cached history: {e}", file=sys.stderr)
+            return None
+
     def test_now(self) -> TestNowResponse:
-        df = _get_clean_df()
         market_status = get_current_market_status()
+        if market_status.is_open:
+            live_resp = self._build_live_test_now(market_status)
+            if live_resp is not None:
+                return live_resp
+
+        df = _get_clean_df()
 
         # Last closed candle
         last_closed_row = df.iloc[-1]
@@ -393,6 +628,14 @@ class MockBackendService:
             market_status=market_status,
         )
 
+    def clear_live_session(self) -> Dict[str, Any]:
+        """
+        Resets the live view baseline to the current timestamp so only candles
+        closing AFTER this moment are plotted, logged, and scored.
+        """
+        self.live_since_epoch = int(time.time())
+        return {"status": "CLEARED", "live_since_epoch": self.live_since_epoch}
+
     def get_signals_log(self, session: Optional[str] = None) -> SignalsLogResponse:
         # Load real live signals log or isolated replay log
         if session == "replay":
@@ -438,6 +681,8 @@ class MockBackendService:
                     if session and session != "replay" and not bar_ts.startswith(session):
                         continue
                     ts_epoch = int(pd.to_datetime(bar_ts, utc=True).timestamp())
+                    if session != "replay" and self.live_since_epoch is not None and (ts_epoch + 300) <= self.live_since_epoch:
+                        continue
                     items.append(
                         SignalLogItem(
                             signal_id=f"sig_{ts_epoch}",
@@ -479,6 +724,8 @@ class MockBackendService:
                     rec = json.loads(line)
                     sig_ts = int(pd.to_datetime(rec["signal_timestamp"], utc=True).timestamp())
                     res_ts = int(pd.to_datetime(rec["resolution_timestamp"], utc=True).timestamp())
+                    if mode != "replay" and self.live_since_epoch is not None and (sig_ts + 300) <= self.live_since_epoch:
+                        continue
                     items.append(
                         OutcomeItem(
                             signal_id=f"sig_{sig_ts}",
