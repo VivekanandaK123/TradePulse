@@ -136,13 +136,14 @@ def get_signals_log(session: Optional[str] = Query(default=None, description="Fi
 
 
 @router.get("/outcomes", response_model=OutcomesResponse, summary="Realized 3-Bar Outcomes")
-def get_outcomes():
+def get_outcomes(mode: Optional[str] = Query(default=None, description="Optional mode, e.g. 'replay'")):
     """
-    Returns realized 15-minute (3-bar) trade outcomes from live_outcomes_final.jsonl:
+    Returns realized 15-minute (3-bar) trade outcomes from live_outcomes_final.jsonl (or replay_outcomes.jsonl):
     gross return, directional return, net return (@ 8bp cost convention), and hit/miss status.
     """
     service = get_mock_service()
-    return service.get_outcomes()
+    mode_str = mode if isinstance(mode, str) else None
+    return service.get_outcomes(mode=mode_str)
 
 
 # ==============================================================================
@@ -175,6 +176,24 @@ def replay_pause():
     """
     service = get_mock_service()
     return service.pause_replay()
+
+
+@router.post("/replay/resume", response_model=ReplayState, summary="Resume Replay Playback")
+def replay_resume():
+    """
+    Resumes paused session replay from current bar index without restarting.
+    """
+    service = get_mock_service()
+    return service.resume_replay()
+
+
+@router.post("/replay/speed", response_model=ReplayState, summary="Set Replay Speed Multiplier")
+def replay_speed(speed_multiplier: float = Query(..., ge=0.5, le=50.0, description="Playback speed multiplier")):
+    """
+    Updates playback speed in place without restarting the replay session.
+    """
+    service = get_mock_service()
+    return service.set_replay_speed(speed=speed_multiplier)
 
 
 @router.post("/replay/stop", response_model=ReplayState, summary="Stop Replay Playback")

@@ -106,11 +106,11 @@ export const GuideDrawer: React.FC<GuideDrawerProps> = ({
           {/* Calibrated Confidence */}
           <div className="text-xs text-slate-400 space-y-2 leading-relaxed">
             <p>
-              <strong className="text-slate-200">What Confidence Means:</strong> The percentage shown (e.g. "Up, 68%") is the Platt-calibrated probability that META will move at least $\pm 15$ bps ($0.15\%$) in the designated direction over the next 15 minutes (3 bars). It is an empirical likelihood, <strong>never a guaranteed price target</strong>.
+              <strong className="text-slate-200">What Confidence Means:</strong> The percentage shown (e.g. "Up, 68%") is the Platt-calibrated probability that META will move at least ±15 bps (0.15%) in the designated direction over the next 15 minutes (3 bars). It is an empirical likelihood, <strong>never a guaranteed price target</strong>.
             </p>
 
             <p>
-              <strong className="text-slate-200">What "No Clear Signal" Means:</strong> When conviction falls below the threshold ($\tau = 0.2635$), the indicator gates the output to Neutral. This prevents overtrading during flat consolidation periods (~47% of all bars).
+              <strong className="text-slate-200">What "No Clear Signal" Means:</strong> When conviction falls below the threshold (τ = 0.2635), the indicator gates the output to Neutral. This prevents overtrading during flat consolidation periods (~47% of all bars).
             </p>
 
             <p>

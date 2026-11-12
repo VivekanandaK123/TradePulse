@@ -10,6 +10,8 @@ import {
   startReplay,
   stepReplay,
   pauseReplay,
+  resumeReplay,
+  setReplaySpeed,
   stopReplay,
   fetchReplayState,
   fetchReplaySessions
@@ -38,7 +40,7 @@ import { GuideDrawer } from './components/GuideDrawer';
 import { ReplayControls } from './components/ReplayControls';
 import { Footer } from './components/Footer';
 
-import { Columns, Rows, AlertTriangle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
 export const App: React.FC = () => {
   // Application Data States
@@ -60,7 +62,7 @@ export const App: React.FC = () => {
   const [replayState, setReplayState] = useState<ReplayState>({
     is_active: false,
     status: 'STOPPED',
-    session_date: '2026-11-06',
+    session_date: '2026-11-09',
     current_bar_index: 0,
     total_bars: 78,
     speed_multiplier: 1.0,
@@ -74,9 +76,6 @@ export const App: React.FC = () => {
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
     return localStorage.getItem('tp_theme') !== 'light';
   });
-  const [chartLayout, setChartLayout] = useState<'stacked' | 'side-by-side'>(() => {
-    return (localStorage.getItem('tp_chart_layout') as any) || 'stacked';
-  });
 
   // Controls & Modals
   const [isAutoMode, setIsAutoMode] = useState<boolean>(false);
@@ -84,22 +83,51 @@ export const App: React.FC = () => {
   const [guideAnchor, setGuideAnchor] = useState<string | undefined>();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [availableSessions, setAvailableSessions] = useState<string[]>([
-    '2026-11-06', '2026-11-05', '2026-11-04', '2026-11-03', '2026-10-31'
+    '2026-11-09', '2026-11-10', '2026-11-11'
   ]);
 
-  // Countdown timer for 5-minute candle boundary
-  const [secondsToNextClose, setSecondsToNextClose] = useState<number>(180);
+  const getSecondsToNext5Min = () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const rem = nowSec % 300;
+    return rem === 0 ? 300 : 300 - rem;
+  };
+
+  // Countdown timer for 5-minute candle boundary (always ticks dynamically)
+  const [secondsToNextClose, setSecondsToNextClose] = useState<number>(getSecondsToNext5Min);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSecondsToNextClose(getSecondsToNext5Min());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const isLiveTradingEnabled = (health?.market_status?.is_open ?? false) || replayState.is_active;
+
+  useEffect(() => {
+    if (!isLiveTradingEnabled && isAutoMode) {
+      setIsAutoMode(false);
+    }
+  }, [isLiveTradingEnabled, isAutoMode]);
+
+  const getTodayEtDate = () => {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  };
 
   // 1. Initial Data Fetching
   const loadInitialData = useCallback(async () => {
     try {
-      const [hData, mData, histData, oofData, sigsData, outData, sessData] = await Promise.all([
+      const todayEt = getTodayEtDate();
+      const [hData, mData, histData, oofData, sessData] = await Promise.all([
         fetchHealth(),
         fetchMeta(),
         fetchHistory(historyRange),
         fetchOOFSignals(),
-        fetchSignalsLog(),
-        fetchOutcomes(),
         fetchReplaySessions(),
       ]);
 
@@ -107,13 +135,25 @@ export const App: React.FC = () => {
       setMeta(mData);
       setHistory(histData);
       setOofSignals(oofData);
-      setSignalsLog(sigsData);
-      setOutcomes(outData);
       if (sessData && sessData.length > 0) {
         setAvailableSessions(sessData);
       }
 
-      // Perform initial test-now to populate live chart with latest candle
+      if (hData.market_status?.is_open) {
+        // Live trading session: load only today's session signals (starts empty before first prediction)
+        const [sigsData, outData] = await Promise.all([
+          fetchSignalsLog(todayEt),
+          fetchOutcomes(),
+        ]);
+        setSignalsLog(sigsData);
+        setOutcomes(outData);
+      } else {
+        // Outside trading hours: start Signal Audit Log empty until Replay or Live session begins
+        setSignalsLog({ session: todayEt, count: 0, signals: [] });
+        setOutcomes({ count: 0, outcomes: [] });
+      }
+
+      // Populate live chart with latest candle context
       const testRes = await callTestNow();
       setLatestSignal(testRes.signal);
       setRecentBars(testRes.recent_bars);
@@ -141,6 +181,7 @@ export const App: React.FC = () => {
 
   // 2. Test Now Trigger
   const handleTestNow = async () => {
+    if (!isLiveTradingEnabled) return;
     setIsTestingNow(true);
     setErrorMessage(null);
     try {
@@ -149,8 +190,9 @@ export const App: React.FC = () => {
       setRecentBars(res.recent_bars);
       setFormingBar(res.forming_bar);
 
-      // Refresh signals log and outcomes
-      const [sigs, outs] = await Promise.all([fetchSignalsLog(), fetchOutcomes()]);
+      // Refresh signals log and outcomes for today's live session
+      const todayEt = getTodayEtDate();
+      const [sigs, outs] = await Promise.all([fetchSignalsLog(todayEt), fetchOutcomes()]);
       setSignalsLog(sigs);
       setOutcomes(outs);
     } catch (err: any) {
@@ -168,13 +210,17 @@ export const App: React.FC = () => {
     let eventSource: EventSource | null = null;
     try {
       eventSource = new EventSource('/api/live/stream');
-      eventSource.onmessage = (event) => {
+      eventSource.onmessage = async (event) => {
         try {
           const payload = JSON.parse(event.data);
           if (payload.data) {
             setLatestSignal(payload.data.signal);
             setRecentBars(payload.data.recent_bars);
             setFormingBar(payload.data.forming_bar);
+            const todayEt = getTodayEtDate();
+            const [sigs, outs] = await Promise.all([fetchSignalsLog(todayEt), fetchOutcomes()]);
+            setSignalsLog(sigs);
+            setOutcomes(outs);
           }
         } catch (e) {
           console.error('Error parsing SSE event:', e);
@@ -188,22 +234,27 @@ export const App: React.FC = () => {
       console.warn('SSE not supported, fallback to interval polling.');
     }
 
-    // Interval countdown
-    const interval = setInterval(() => {
-      setSecondsToNextClose((prev) => (prev <= 1 ? 300 : prev - 1));
-    }, 1000);
-
     return () => {
       if (eventSource) eventSource.close();
-      clearInterval(interval);
     };
   }, [isAutoMode]);
 
   // 4. Replay Mode Handlers
   const handleStartReplay = async (date: string, speed: number) => {
     try {
+      // Clear log & chart immediately so demo testing starts fresh
+      setSignalsLog({ session: 'replay', count: 0, signals: [] });
+      setOutcomes({ count: 0, outcomes: [] });
+      setFormingBar(undefined);
+
       const state = await startReplay(date, speed);
       setReplayState(state);
+      if (state.current_signal) setLatestSignal(state.current_signal);
+      setRecentBars(state.current_bar ? [state.current_bar] : []);
+
+      const [sigs, outs] = await Promise.all([fetchSignalsLog('replay'), fetchOutcomes('replay')]);
+      setSignalsLog(sigs);
+      setOutcomes(outs);
     } catch (err: any) {
       setErrorMessage(`Failed to start replay: ${err.message}`);
     }
@@ -214,7 +265,16 @@ export const App: React.FC = () => {
       const state = await stepReplay();
       setReplayState(state);
       if (state.current_signal) setLatestSignal(state.current_signal);
-      if (state.current_bar) setRecentBars((prev) => [...prev.slice(-149), state.current_bar!]);
+      if (state.current_bar) {
+        setRecentBars((prev) => {
+          const filtered = prev.filter((b) => b.time !== state.current_bar!.time);
+          return [...filtered.slice(-149), state.current_bar!];
+        });
+      }
+
+      const [sigs, outs] = await Promise.all([fetchSignalsLog('replay'), fetchOutcomes('replay')]);
+      setSignalsLog(sigs);
+      setOutcomes(outs);
     } catch (err: any) {
       setErrorMessage(`Step replay failed: ${err.message}`);
     }
@@ -227,6 +287,46 @@ export const App: React.FC = () => {
     } catch (err: any) {
       console.error(err);
     }
+  };
+
+  const handleResumeReplay = async () => {
+    try {
+      const state = await resumeReplay();
+      setReplayState(state);
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  const handleChangeReplaySpeed = async (speed: number) => {
+    if (replayState.current_bar_index === 0) {
+      setReplayState((prev) => ({ ...prev, speed_multiplier: speed }));
+      return;
+    }
+    try {
+      const state = await setReplaySpeed(speed);
+      setReplayState(state);
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  const handleSelectReplaySession = (date: string) => {
+    setSignalsLog({ session: 'replay', count: 0, signals: [] });
+    setOutcomes({ count: 0, outcomes: [] });
+    setRecentBars([]);
+    setLatestSignal(undefined);
+    setFormingBar(undefined);
+    setReplayState((prev) => ({
+      ...prev,
+      is_active: true,
+      status: 'STOPPED',
+      session_date: date,
+      current_bar_index: 0,
+      signals_emitted_count: 0,
+      current_bar: undefined,
+      current_signal: undefined,
+    }));
   };
 
   const handleStopReplay = async () => {
@@ -257,8 +357,8 @@ export const App: React.FC = () => {
     if (replayState.is_active) {
       handleStopReplay();
     } else {
-      const defaultDate = availableSessions[availableSessions.length - 1] || '2026-11-06';
-      handleStartReplay(defaultDate, 1.0);
+      const defaultDate = availableSessions[0] || '2026-11-09';
+      handleSelectReplaySession(defaultDate);
     }
   };
 
@@ -269,9 +369,11 @@ export const App: React.FC = () => {
         return;
       }
       if (e.key === 't' || e.key === 'T') {
+        if (!isLiveTradingEnabled) return;
         e.preventDefault();
         handleTestNow();
       } else if (e.key === 'a' || e.key === 'A') {
+        if (!isLiveTradingEnabled) return;
         e.preventDefault();
         setIsAutoMode((prev) => !prev);
       } else if (e.key === 'r' || e.key === 'R') {
@@ -285,7 +387,7 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [replayState.is_active, availableSessions]);
+  }, [replayState.is_active, availableSessions, isLiveTradingEnabled]);
 
   // Persist Preferences
   const handleToggleTimeZone = () => {
@@ -303,12 +405,6 @@ export const App: React.FC = () => {
     } else {
       document.documentElement.classList.remove('dark');
     }
-  };
-
-  const handleToggleChartLayout = () => {
-    const next = chartLayout === 'stacked' ? 'side-by-side' : 'stacked';
-    setChartLayout(next);
-    localStorage.setItem('tp_chart_layout', next);
   };
 
   return (
@@ -334,9 +430,11 @@ export const App: React.FC = () => {
       <ReplayControls
         replayState={replayState}
         availableSessions={availableSessions}
+        onSelectSession={handleSelectReplaySession}
         onStartReplay={handleStartReplay}
         onStepReplay={handleStepReplay}
         onPauseReplay={handlePauseReplay}
+        onResumeReplay={handleResumeReplay}
         onStopReplay={handleStopReplay}
       />
 
@@ -357,81 +455,64 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 p-3.5 max-w-[1920px] mx-auto w-full flex flex-col lg:flex-row gap-3.5">
-        {/* Left Column: Charts Area */}
-        <div className="flex-1 flex flex-col gap-3 min-w-0">
-          {/* Chart Controls Bar */}
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-semibold text-slate-300">
-              Interactive Financial Charts (5-Minute Timeframe)
-            </span>
-            <button
-              onClick={handleToggleChartLayout}
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded text-slate-300 transition"
-              title="Toggle between Stacked and Side-by-Side chart layout"
-            >
-              {chartLayout === 'stacked' ? <Columns className="h-3.5 w-3.5" /> : <Rows className="h-3.5 w-3.5" />}
-              <span>Layout: {chartLayout === 'stacked' ? 'Stacked' : 'Side-by-Side'}</span>
-            </button>
-          </div>
+      <main className="flex-1 p-3.5 max-w-[1920px] mx-auto w-full flex flex-col gap-3.5">
+        {/* Top Row: Full-width Historical Training Data */}
+        <HistoricalChart
+          bars={history?.bars ?? []}
+          periodBands={history?.period_bands ?? []}
+          oofSignals={oofSignals?.signals}
+          selectedRange={historyRange}
+          onSelectRange={handleSelectRange}
+          timeZone={timeZone}
+        />
 
-          {/* Charts Display (Stacked or Side-by-Side) */}
-          <div className={chartLayout === 'side-by-side' ? 'grid grid-cols-2 gap-3' : 'flex flex-col gap-3'}>
-            {/* Chart 1: Historical Training Data */}
-            <HistoricalChart
-              bars={history?.bars ?? []}
-              periodBands={history?.period_bands ?? []}
-              oofSignals={oofSignals?.signals}
-              selectedRange={historyRange}
-              onSelectRange={handleSelectRange}
-              timeZone={timeZone}
-            />
-
-            {/* Chart 2: Live Testing Chart (Main Screen) */}
+        {/* Bottom Area: 2-Column Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
+          {/* Left Column (~2/3): Live Testing Chart + Model Provenance and Card */}
+          <div className="lg:col-span-8 flex flex-col gap-3.5 min-w-0">
             <LiveChart
               recentBars={recentBars}
               formingBar={formingBar}
               latestSignal={latestSignal}
               marketStatus={health?.market_status}
               isAutoMode={isAutoMode}
-              onToggleAutoMode={() => setIsAutoMode(!isAutoMode)}
+              onToggleAutoMode={() => {
+                if (isLiveTradingEnabled) setIsAutoMode(!isAutoMode);
+              }}
               onTestNow={handleTestNow}
               isTestingNow={isTestingNow}
               timeZone={timeZone}
               secondsToNextClose={secondsToNextClose}
+              isReplayActive={replayState.is_active}
             />
+
+            <ModelCard meta={meta || undefined} />
           </div>
+
+          {/* Right Column (~1/3): Predicted Direction, Today's Scoreboard, Signal Audit Log */}
+          <aside className="lg:col-span-4 flex flex-col gap-3.5 min-w-0">
+            <PredictionCard
+              signal={latestSignal}
+              meta={meta || undefined}
+              timeZone={timeZone}
+              onOpenGuideAnchor={(anchor) => {
+                setGuideAnchor(anchor);
+                setIsGuideOpen(true);
+              }}
+            />
+
+            <SignalLog
+              signals={signalsLog?.signals ?? []}
+              timeZone={timeZone}
+            />
+
+            <Scoreboard
+              outcomes={outcomes || undefined}
+              meta={meta || undefined}
+              signalsTodayCount={signalsLog?.count ?? 0}
+            />
+          </aside>
         </div>
-
-        {/* Right Sidebar: One-Second Trader Read */}
-        <aside className="w-full lg:w-96 flex flex-col gap-3 flex-shrink-0">
-          {/* 1. Prediction Card (Dominant Read) */}
-          <PredictionCard
-            signal={latestSignal}
-            meta={meta || undefined}
-            timeZone={timeZone}
-            onOpenGuideAnchor={(anchor) => {
-              setGuideAnchor(anchor);
-              setIsGuideOpen(true);
-            }}
-          />
-
-          {/* 2. Today's Scoreboard */}
-          <Scoreboard
-            outcomes={outcomes || undefined}
-            meta={meta || undefined}
-            signalsTodayCount={signalsLog?.count ?? 0}
-          />
-
-          {/* 3. Signal Audit Log */}
-          <SignalLog
-            signals={signalsLog?.signals ?? []}
-            timeZone={timeZone}
-          />
-
-          {/* 4. Collapsible Model Card */}
-          <ModelCard meta={meta || undefined} />
-        </aside>
       </main>
 
       {/* User Guide Drawer */}

@@ -50,6 +50,25 @@ METADATA_DIR = PROJECT_ROOT / "artifacts" / "metadata"
 
 # Cached historical data
 _CACHED_CLEAN_DF: Optional[pd.DataFrame] = None
+_CACHED_DEMO_DF: Optional[pd.DataFrame] = None
+
+
+def _get_demo_df() -> Optional[pd.DataFrame]:
+    global _CACHED_DEMO_DF
+    if _CACHED_DEMO_DF is None:
+        demo_path = DATA_DIR / "processed" / "demo_live_testing_data.csv"
+        if demo_path.exists():
+            df = pd.read_csv(demo_path)
+            ts = pd.to_datetime(df["timestamp"], utc=True)
+            df["time"] = ts.astype("int64") // 10**6
+            df["timestamp_ny"] = ts.dt.tz_convert("America/New_York")
+            df["session_date"] = df["timestamp_ny"].dt.date.astype(str)
+            if "vwap" not in df.columns:
+                df["vwap"] = df["close"]
+            if "is_filled" not in df.columns:
+                df["is_filled"] = 0
+            _CACHED_DEMO_DF = df
+    return _CACHED_DEMO_DF
 
 
 def _get_clean_df() -> pd.DataFrame:
@@ -59,7 +78,7 @@ def _get_clean_df() -> pd.DataFrame:
         if clean_path.exists():
             df = pd.read_csv(clean_path)
             ts = pd.to_datetime(df["timestamp"], utc=True)
-            df["time"] = ts.astype("int64") // 10**9
+            df["time"] = ts.astype("int64") // 10**6
             df["timestamp_ny"] = ts.dt.tz_convert("America/New_York")
             df["session_date"] = df["timestamp_ny"].dt.date.astype(str)
             if "vwap" not in df.columns:
@@ -149,16 +168,23 @@ class MockBackendService:
         df = _get_clean_df()
         range_upper = range_param.upper()
 
+        # Use session-based slicing so each range shows complete trading sessions
+        # regardless of bars-per-day variation (early closes, data gaps etc.)
+        all_sessions = df["session_date"].unique()  # already sorted chronologically
+        n_sessions = len(all_sessions)
+
         if range_upper == "1D":
-            sub_df = df.tail(78).copy()
+            keep_sessions = all_sessions[-1:]        # last 1 session
         elif range_upper == "5D":
-            sub_df = df.tail(390).copy()
+            keep_sessions = all_sessions[-5:]        # last 5 sessions
         elif range_upper == "1M":
-            sub_df = df.tail(1638).copy()
+            keep_sessions = all_sessions[-21:]       # ~1 month of trading days
         elif range_upper == "3M":
-            sub_df = df.tail(4914).copy()
-        else: # "ALL"
-            sub_df = df.copy()
+            keep_sessions = all_sessions[-63:]       # ~3 months of trading days
+        else:  # "ALL"
+            keep_sessions = all_sessions             # every session
+
+        sub_df = df[df["session_date"].isin(keep_sessions)].copy()
 
         bars: List[CandleBar] = []
         for _, row in sub_df.iterrows():
@@ -371,9 +397,35 @@ class MockBackendService:
         # Load real live signals log or isolated replay log
         if session == "replay":
             log_path = DATA_DIR / "replay_signals.jsonl"
+            outcomes_path = DATA_DIR / "replay_outcomes.jsonl"
         else:
             log_path = DATA_DIR / "live_signals_final.jsonl"
-            
+            outcomes_path = DATA_DIR / "live_outcomes_final.jsonl"
+
+        # Index resolved 15-min (3-bar) outcomes by signal_timestamp
+        outcomes_by_ts: Dict[str, Dict[str, Any]] = {}
+        if outcomes_path.exists():
+            with open(outcomes_path, "r", encoding="utf-8") as f_out:
+                for line in f_out:
+                    if not line.strip():
+                        continue
+                    rec_out = json.loads(line)
+                    sig_ts_key = rec_out.get("signal_timestamp", "")
+                    ret_bps = float(rec_out.get("realized_return_bps", 0.0))
+                    if ret_bps > 15.0:
+                        actual_dir = "Up"
+                    elif ret_bps < -15.0:
+                        actual_dir = "Down"
+                    else:
+                        actual_dir = "Neutral"
+                    outcomes_by_ts[sig_ts_key] = {
+                        "exit_price": rec_out.get("exit_price", 0.0),
+                        "realized_return_bps": ret_bps,
+                        "net_return_bps_8bp": rec_out.get("net_return_bps_8bp", 0.0),
+                        "is_hit": bool(rec_out.get("is_correct", False)),
+                        "actual_direction": actual_dir,
+                    }
+
         items: List[SignalLogItem] = []
 
         if log_path.exists():
@@ -398,28 +450,12 @@ class MockBackendService:
                             entry_price=rec.get("close_price", 0.0),
                             is_gated=rec.get("is_gated", False),
                             checksum=hashlib.sha256(line.encode("utf-8")).hexdigest()[:12],
+                            outcome=outcomes_by_ts.get(bar_ts),
                         )
                     )
 
-        if not items and session != "replay":
-            # Fallback mock items
-            now = int(time.time())
-            for i in range(10):
-                t = now - (10 - i) * 300
-                items.append(
-                    SignalLogItem(
-                        signal_id=f"sig_mock_{t}",
-                        bar_time=t,
-                        bar_timestamp_ny="2026-11-06 15:00:00 ET",
-                        direction="Up" if i % 2 == 0 else "Down",
-                        signal_code=1 if i % 2 == 0 else -1,
-                        confidence_pct=65.2,
-                        conviction=0.3340,
-                        entry_price=612.45 + i * 0.3,
-                        is_gated=True,
-                        checksum="a7f8e32901bb",
-                    )
-                )
+        # Show newest predictions first
+        items.reverse()
 
         return SignalsLogResponse(
             session=session or "Latest",
@@ -463,24 +499,42 @@ class MockBackendService:
         return OutcomesResponse(count=len(items), outcomes=items)
 
     def get_replay_sessions(self) -> List[str]:
+        demo_df = _get_demo_df()
+        if demo_df is not None and "session_date" in demo_df.columns:
+            dates = demo_df["session_date"].unique().tolist()
+            if dates:
+                return dates
         df = _get_clean_df()
         if "session_date" in df.columns:
             dates = df["session_date"].unique().tolist()
             return dates[-15:]
-        return ["2026-11-06", "2026-11-05", "2026-11-04", "2026-11-03", "2026-10-31"]
+        return ["2026-11-09", "2026-11-10", "2026-11-11"]
 
-    def start_replay(self, session_date: str = "2026-11-06", speed: float = 1.0) -> ReplayState:
-        df = _get_clean_df()
+    def start_replay(self, session_date: str = "2026-11-09", speed: float = 1.0) -> ReplayState:
+        hist_df = _get_clean_df()
+        demo_df = _get_demo_df()
 
-        session_mask = df["session_date"] == session_date if "session_date" in df.columns else pd.Series(False, index=df.index)
-        if not session_mask.any():
-            session_date = df["session_date"].iloc[-1] if "session_date" in df.columns else "2026-11-06"
-            session_mask = df["session_date"] == session_date if "session_date" in df.columns else pd.Series(True, index=df.index)
+        # Prefer unseen demo dataset (Nov 7-11, 2026) when session_date matches
+        if demo_df is not None and "session_date" in demo_df.columns and (demo_df["session_date"] == session_date).any():
+            # Combine tail of historical data + demo_df so rolling warm-up is 100% causal
+            base_cols = [c for c in hist_df.columns if c in demo_df.columns]
+            combined_df = pd.concat([hist_df[base_cols].tail(200), demo_df[base_cols]], ignore_index=True)
+            session_mask = combined_df["session_date"] == session_date
+            session_df = combined_df[session_mask].copy()
+            first_idx = session_df.index[0]
+            seed_start = max(0, first_idx - 200)
+            seed_df = combined_df.iloc[seed_start:first_idx].copy()
+        else:
+            df = hist_df
+            session_mask = df["session_date"] == session_date if "session_date" in df.columns else pd.Series(False, index=df.index)
+            if not session_mask.any():
+                session_date = df["session_date"].iloc[-1] if "session_date" in df.columns else "2026-11-06"
+                session_mask = df["session_date"] == session_date if "session_date" in df.columns else pd.Series(True, index=df.index)
 
-        session_df = df[session_mask].copy()
-        first_idx = session_df.index[0]
-        seed_start = max(0, first_idx - 200)
-        seed_df = df.iloc[seed_start:first_idx].copy()
+            session_df = df[session_mask].copy()
+            first_idx = session_df.index[0]
+            seed_start = max(0, first_idx - 200)
+            seed_df = df.iloc[seed_start:first_idx].copy()
 
         replay_sig_path = DATA_DIR / "replay_signals.jsonl"
         replay_out_path = DATA_DIR / "replay_outcomes.jsonl"
@@ -615,6 +669,15 @@ class MockBackendService:
 
     def pause_replay(self) -> ReplayState:
         self.replay_state.status = "PAUSED"
+        return self.replay_state
+
+    def resume_replay(self) -> ReplayState:
+        if self.replay_state.is_active and self.replay_state.current_bar_index < self.replay_state.total_bars:
+            self.replay_state.status = "PLAYING"
+        return self.replay_state
+
+    def set_replay_speed(self, speed: float) -> ReplayState:
+        self.replay_state.speed_multiplier = float(speed)
         return self.replay_state
 
     def stop_replay(self) -> ReplayState:

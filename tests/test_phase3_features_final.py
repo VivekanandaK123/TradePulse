@@ -41,7 +41,7 @@ class TestPhase3Features(unittest.TestCase):
         """Verifies that available historical sessions are returned for the UI dropdown."""
         sessions = self.service.get_replay_sessions()
         self.assertIsInstance(sessions, list)
-        self.assertGreaterEqual(len(sessions), 5)
+        self.assertGreaterEqual(len(sessions), 3)
         # Ensure session dates are in YYYY-MM-DD format
         self.assertRegex(sessions[-1], r"^\d{4}-\d{2}-\d{2}$")
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SignalLogItem } from '../types/api';
-import { TimeZoneMode, formatPrice, formatBps, formatTimestamp } from '../lib/formatters';
-import { ListFilter, Download, ArrowUpRight, ArrowDownRight, Minus, Check, X } from 'lucide-react';
+import { TimeZoneMode, formatBps, formatTimestamp } from '../lib/formatters';
+import { ListFilter, Download, ArrowUpRight, ArrowDownRight, Check, X, Clock } from 'lucide-react';
 
 interface SignalLogProps {
   signals: SignalLogItem[];
@@ -81,26 +81,38 @@ export const SignalLog: React.FC<SignalLogProps> = ({ signals, timeZone }) => {
       </div>
 
       {/* Scrollable Table */}
-      <div className="max-h-56 overflow-y-auto text-xs font-mono border border-slate-800 rounded">
+      <div className="max-h-64 overflow-y-auto text-xs font-mono border border-slate-800 rounded">
         {filtered.length === 0 ? (
           <div className="p-4 text-center text-slate-500 text-xs">
-            No signals match the selected filter.
+            {signals.length === 0
+              ? 'Log is empty — awaiting first closed 5-min bar prediction.'
+              : 'No signals match the selected filter.'}
           </div>
         ) : (
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-950 text-slate-400 text-[10px] uppercase sticky top-0 border-b border-slate-800">
               <tr>
                 <th className="p-1.5">Time</th>
-                <th className="p-1.5">Dir</th>
+                <th className="p-1.5">Prediction</th>
                 <th className="p-1.5">Conf</th>
-                <th className="p-1.5">Price</th>
-                <th className="p-1.5">Outcome</th>
+                <th className="p-1.5">Actual</th>
+                <th className="p-1.5">Verdict</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300 text-[11px]">
               {filtered.map((s) => {
                 const isUp = s.direction === 'Up';
                 const isDown = s.direction === 'Down';
+                const predLabel = s.direction === 'no clear signal' ? 'Neutral' : s.direction;
+
+                const actualDir = s.outcome
+                  ? (s.outcome.actual_direction ??
+                      (s.outcome.realized_return_bps > 15
+                        ? 'Up'
+                        : s.outcome.realized_return_bps < -15
+                        ? 'Down'
+                        : 'Neutral'))
+                  : null;
 
                 return (
                   <tr key={s.signal_id} className="hover:bg-slate-800/40">
@@ -109,26 +121,46 @@ export const SignalLog: React.FC<SignalLogProps> = ({ signals, timeZone }) => {
                     </td>
                     <td className="p-1.5 whitespace-nowrap">
                       <span className={`inline-flex items-center gap-0.5 font-bold ${
-                        isUp ? 'text-emerald-400' : isDown ? 'text-rose-400' : 'text-slate-500'
+                        isUp ? 'text-emerald-400' : isDown ? 'text-rose-400' : 'text-slate-400'
                       }`}>
                         {isUp && <ArrowUpRight className="h-3 w-3" />}
                         {isDown && <ArrowDownRight className="h-3 w-3" />}
-                        {s.direction === 'no clear signal' ? 'Neutral' : s.direction}
+                        {predLabel}
                       </span>
                     </td>
                     <td className="p-1.5 whitespace-nowrap text-slate-200">
                       {s.confidence_pct.toFixed(0)}%
                     </td>
-                    <td className="p-1.5 whitespace-nowrap text-slate-300">
-                      {formatPrice(s.entry_price)}
+                    <td className="p-1.5 whitespace-nowrap">
+                      {s.outcome && actualDir ? (
+                        <span className={`inline-flex items-center gap-1 font-medium ${
+                          actualDir === 'Up'
+                            ? 'text-emerald-400'
+                            : actualDir === 'Down'
+                            ? 'text-rose-400'
+                            : 'text-slate-400'
+                        }`} title={`15m return: ${formatBps(s.outcome.realized_return_bps)}`}>
+                          <span>{actualDir}</span>
+                          <span className="text-[10px] text-slate-500">
+                            ({formatBps(s.outcome.realized_return_bps).replace(' bps', 'bp')})
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-amber-400/80 text-[10px]">
+                          <Clock className="h-2.5 w-2.5" />
+                          Pending
+                        </span>
+                      )}
                     </td>
                     <td className="p-1.5 whitespace-nowrap">
                       {s.outcome ? (
-                        <span className={`inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[10px] ${
-                          s.outcome.is_hit ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'
+                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          s.outcome.is_hit
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60'
+                            : 'bg-rose-950 text-rose-300 border border-rose-800/60'
                         }`}>
                           {s.outcome.is_hit ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
-                          {formatBps(s.outcome.realized_return_bps)}
+                          {s.outcome.is_hit ? 'Correct' : 'Wrong'}
                         </span>
                       ) : (
                         <span className="text-slate-500 text-[10px]">Pending</span>

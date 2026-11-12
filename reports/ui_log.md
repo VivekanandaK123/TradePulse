@@ -141,3 +141,16 @@ Captured full terminal layouts using headless Chrome into [`reports/ui_screensho
 
 
 
+
+
+## 2026-11-12 — Chart Timestamp Fix
+
+**Bug:** Historical chart X-axis showed \18:19\ and \21 Jan '70\ (Unix epoch ˜ 0).
+
+**Root cause:** \_get_clean_df()\ in \mock_service.py\ computed \df['time'] = ts.astype('int64') // 10**9\. Pandas \Timestamp.astype('int64')\ returns **nanoseconds** (e.g. \1762180200_000_000\), so dividing by 10^9 gave \1762180\ seconds ˜ Jan 21, 1970. Correct divisor is 10^6 (yielding \1762180200\ seconds = 2025-11-03 09:30 ET).
+
+**Fix:** Changed divisor to \// 10**6\ in \mock_service.py\ line 62.
+
+**Range selector:** Also replaced fixed tail-row counts (78/390/1638/4914) with session-based slicing (\df[df['session_date'].isin(keep_sessions)]\) for correctness when any session has fewer bars (early close, etc.).
+
+**Tests:** 15/15 pass. Frontend rebuilt successfully.

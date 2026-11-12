@@ -1,25 +1,30 @@
 import React from 'react';
 import { ReplayState } from '../types/api';
-import { Play, Pause, SkipForward, Square, AlertTriangle, FastForward } from 'lucide-react';
+import { Play, Pause, SkipForward, Square, AlertTriangle, Zap } from 'lucide-react';
 
 interface ReplayControlsProps {
   replayState: ReplayState;
   availableSessions?: string[];
+  onSelectSession: (date: string) => void;
   onStartReplay: (date: string, speed: number) => void;
   onStepReplay: () => void;
   onPauseReplay: () => void;
+  onResumeReplay: () => void;
   onStopReplay: () => void;
 }
 
 export const ReplayControls: React.FC<ReplayControlsProps> = ({
   replayState,
-  availableSessions = ['2026-11-06', '2026-11-05', '2026-11-04', '2026-11-03', '2026-10-31'],
+  availableSessions = ['2026-11-09', '2026-11-10', '2026-11-11'],
+  onSelectSession,
   onStartReplay,
   onStepReplay,
   onPauseReplay,
+  onResumeReplay,
   onStopReplay,
 }) => {
   const isPlaying = replayState.status === 'PLAYING';
+  const hasStarted = replayState.current_bar_index > 0;
   const isActive = replayState.is_active;
 
   if (!isActive) return null;
@@ -27,8 +32,6 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
   const progressPct = replayState.total_bars > 0
     ? Math.round((replayState.current_bar_index / replayState.total_bars) * 100)
     : 0;
-
-  const speedOptions = [1.0, 5.0, 20.0];
 
   return (
     <div className="bg-amber-950/90 border-b border-amber-800/80 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-amber-200 shadow-md">
@@ -50,7 +53,7 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
           <span className="text-amber-400">Session:</span>
           <select
             value={replayState.session_date}
-            onChange={(e) => onStartReplay(e.target.value, replayState.speed_multiplier)}
+            onChange={(e) => onSelectSession(e.target.value)}
             className="bg-transparent text-amber-100 font-bold focus:outline-none cursor-pointer"
           >
             {availableSessions.map((d) => (
@@ -79,28 +82,23 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
 
         <span className="text-amber-500">•</span>
 
-        {/* Speed Multiplier Toggles */}
-        <div className="flex items-center gap-1 bg-amber-900/40 p-0.5 rounded border border-amber-800/60">
-          <FastForward className="h-3 w-3 text-amber-400 ml-1" />
-          {speedOptions.map((s) => (
-            <button
-              key={s}
-              onClick={() => onStartReplay(replayState.session_date, s)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${
-                replayState.speed_multiplier === s
-                  ? 'bg-amber-500 text-slate-950 shadow-sm'
-                  : 'text-amber-300 hover:bg-amber-800/60'
-              }`}
-            >
-              {s}x
-            </button>
-          ))}
-        </div>
+        <span className="text-[10px] bg-amber-900/50 border border-amber-700/60 px-1.5 py-0.5 rounded text-amber-300 font-bold">
+          1x Speed
+        </span>
       </div>
 
       {/* Right: Control Action Buttons */}
       <div className="flex items-center gap-1.5">
-        {isPlaying ? (
+        {!hasStarted ? (
+          <button
+            onClick={() => onStartReplay(replayState.session_date, 1.0)}
+            className="flex items-center gap-1.5 px-3.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-sm transition"
+            title="Start demo testing on the selected unseen session"
+          >
+            <Zap className="h-3.5 w-3.5 fill-slate-950" />
+            <span>Test Live Demo</span>
+          </button>
+        ) : isPlaying ? (
           <button
             onClick={onPauseReplay}
             className="flex items-center gap-1 px-3 py-1 rounded bg-amber-700 hover:bg-amber-600 text-white text-xs font-semibold shadow-sm transition"
@@ -111,23 +109,25 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
           </button>
         ) : (
           <button
-            onClick={() => onStartReplay(replayState.session_date, replayState.speed_multiplier)}
+            onClick={onResumeReplay}
             className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold shadow-sm transition"
-            title="Play replay automatically"
+            title="Resume replay playback"
           >
             <Play className="h-3.5 w-3.5 fill-slate-950" />
             <span>Play</span>
           </button>
         )}
 
-        <button
-          onClick={onStepReplay}
-          className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-800/80 hover:bg-amber-700 text-amber-100 text-xs font-medium border border-amber-700/60 transition"
-          title="Step forward one 5-minute candle"
-        >
-          <SkipForward className="h-3.5 w-3.5" />
-          <span>Step (+5m)</span>
-        </button>
+        {hasStarted && (
+          <button
+            onClick={onStepReplay}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-800/80 hover:bg-amber-700 text-amber-100 text-xs font-medium border border-amber-700/60 transition"
+            title="Step forward one 5-minute candle"
+          >
+            <SkipForward className="h-3.5 w-3.5" />
+            <span>Step (+5m)</span>
+          </button>
+        )}
 
         <button
           onClick={onStopReplay}

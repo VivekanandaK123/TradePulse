@@ -108,7 +108,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
             Conviction: <strong className="text-slate-200 font-mono">{signal.conviction.toFixed(4)}</strong>
           </span>
           <span className="text-slate-500 text-[11px]">
-            Threshold $\tau$: <strong className="text-slate-300 font-mono">{signal.threshold.toFixed(4)}</strong>
+            Threshold (τ): <strong className="text-slate-300 font-mono">{signal.threshold.toFixed(4)}</strong>
           </span>
         </div>
 

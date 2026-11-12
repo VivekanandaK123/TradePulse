@@ -136,6 +136,7 @@ export interface SignalLogItem {
     realized_return_bps: number;
     net_return_bps_8bp: number;
     is_hit: boolean;
+    actual_direction?: string;
   };
 }
 

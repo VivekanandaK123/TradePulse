@@ -49,14 +49,39 @@ export const ModelCard: React.FC<ModelCardProps> = ({ meta }) => {
         </div>
       </div>
 
+      {/* Target Labeling Formula (Always visible!) */}
+      <div className="bg-slate-950/80 border border-slate-800/90 rounded p-2.5 text-[11px] flex flex-col gap-1.5">
+        <div className="flex items-center justify-between text-slate-300 font-semibold">
+          <span>Target Labeling Formula ({meta.label_name})</span>
+          <span className="font-mono text-blue-400">θ = ±{meta.theta_bps} bps (±{meta.theta_pct}%)</span>
+        </div>
+        <div className="font-mono text-slate-200 bg-slate-900/90 px-2 py-1 rounded border border-slate-800">
+          R(t, t+3) = (close[t+3] / close[t]) − 1 &nbsp;|&nbsp; 3-bar (15m) intraday forward return
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 font-mono text-[10px]">
+          <div className="bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 px-2 py-1 rounded">
+            Up (+1): R &gt; +0.0015
+          </div>
+          <div className="bg-slate-900 border border-slate-800 text-slate-300 px-2 py-1 rounded">
+            Neutral (0): |R| ≤ 0.0015
+          </div>
+          <div className="bg-rose-950/40 border border-rose-800/50 text-rose-300 px-2 py-1 rounded">
+            Down (−1): R &lt; −0.0015
+          </div>
+        </div>
+        <span className="text-[10px] text-slate-500">
+          Intraday only (grouped by session date; last {meta.horizon_bars} bars of each session dropped).
+        </span>
+      </div>
+
       {/* Expanded Details */}
       {isExpanded && (
         <div className="flex flex-col gap-3 pt-2 text-xs border-t border-slate-800 text-slate-300">
           {/* Core Configuration Grid */}
           <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-950 p-2.5 rounded border border-slate-800/80">
             <div>
-              <span className="text-slate-500 block">Target Label ($\theta$):</span>
-              <strong className="text-slate-200 font-mono">$\pm{meta.theta_bps}$ bps (15m)</strong>
+              <span className="text-slate-500 block">Target Label (θ):</span>
+              <strong className="text-slate-200 font-mono">±{meta.theta_bps} bps (15m)</strong>
             </div>
             <div>
               <span className="text-slate-500 block">Horizon:</span>
@@ -79,7 +104,7 @@ export const ModelCard: React.FC<ModelCardProps> = ({ meta }) => {
               <strong className="text-slate-200 font-mono">{meta.recency_weighting.half_life} (No decay)</strong>
             </div>
             <div>
-              <span className="text-slate-500 block">Threshold $\tau$:</span>
+              <span className="text-slate-500 block">Threshold (τ):</span>
               <strong className="text-slate-200 font-mono">{meta.signal_rule.conviction_threshold_tau.toFixed(4)}</strong>
             </div>
             <div>

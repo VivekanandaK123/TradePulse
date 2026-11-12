@@ -51,8 +51,9 @@ export async function fetchSignalsLog(session?: string): Promise<SignalsLogRespo
   return res.json();
 }
 
-export async function fetchOutcomes(): Promise<OutcomesResponse> {
-  const res = await fetch(`${BASE_URL}/outcomes`);
+export async function fetchOutcomes(mode?: string): Promise<OutcomesResponse> {
+  const url = mode ? `${BASE_URL}/outcomes?mode=${encodeURIComponent(mode)}` : `${BASE_URL}/outcomes`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Fetch outcomes failed: ${res.statusText}`);
   return res.json();
 }
@@ -76,6 +77,20 @@ export async function stepReplay(): Promise<ReplayState> {
 export async function pauseReplay(): Promise<ReplayState> {
   const res = await fetch(`${BASE_URL}/replay/pause`, { method: 'POST' });
   if (!res.ok) throw new Error(`Pause replay failed: ${res.statusText}`);
+  return res.json();
+}
+
+export async function resumeReplay(): Promise<ReplayState> {
+  const res = await fetch(`${BASE_URL}/replay/resume`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Resume replay failed: ${res.statusText}`);
+  return res.json();
+}
+
+export async function setReplaySpeed(speed: number): Promise<ReplayState> {
+  const res = await fetch(`${BASE_URL}/replay/speed?speed_multiplier=${encodeURIComponent(speed)}`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`Set replay speed failed: ${res.statusText}`);
   return res.json();
 }
 

@@ -15,6 +15,7 @@ interface LiveChartProps {
   isTestingNow: boolean;
   timeZone: TimeZoneMode;
   secondsToNextClose?: number;
+  isReplayActive?: boolean;
 }
 
 export const LiveChart: React.FC<LiveChartProps> = ({
@@ -28,6 +29,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   isTestingNow,
   timeZone,
   secondsToNextClose = 180,
+  isReplayActive = false,
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -37,6 +39,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   const [hoveredCandle, setHoveredCandle] = useState<CandleBar | null>(null);
 
   const isOpen = marketStatus?.is_open ?? false;
+  const isSectionEnabled = isOpen || isReplayActive;
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -203,17 +206,24 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   }, [recentBars, formingBar, latestSignal]);
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-2.5">
+    <div className={`bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-2.5 transition-opacity ${
+      !isSectionEnabled ? 'opacity-65' : ''
+    }`}>
       {/* Header & Primary Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-2.5">
         <div className="flex items-center gap-2">
-          <div className="h-2 w-2 rounded-full bg-blue-500 animate-ping" />
+          <div className={`h-2 w-2 rounded-full ${isSectionEnabled ? 'bg-blue-500 animate-ping' : 'bg-slate-600'}`} />
           <span className="font-semibold text-sm tracking-wider text-slate-200 uppercase">
             Live Testing Chart
           </span>
           <span className="text-xs bg-slate-800 border border-slate-700 text-slate-300 px-2 py-0.5 rounded font-mono">
             5-Minute Closed Bars
           </span>
+          {!isSectionEnabled && (
+            <span className="text-[11px] bg-amber-950/60 border border-amber-700/60 text-amber-300 px-2 py-0.5 rounded font-medium">
+              Disabled (Non-Trading Hours)
+            </span>
+          )}
         </div>
 
         {/* Primary Action Buttons */}
@@ -221,36 +231,41 @@ export const LiveChart: React.FC<LiveChartProps> = ({
           {/* Auto Mode Toggle */}
           <button
             onClick={onToggleAutoMode}
+            disabled={!isSectionEnabled}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition ${
-              isAutoMode
+              !isSectionEnabled
+                ? 'bg-slate-800/50 text-slate-500 border-slate-800 cursor-not-allowed'
+                : isAutoMode
                 ? 'bg-blue-600/20 text-blue-300 border-blue-500/40 shadow-sm'
                 : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
             }`}
-            title="Auto-refresh on every candle close (Key: A)"
+            title={isSectionEnabled ? 'Auto-refresh on every candle close (Key: A)' : 'Available during trading hours only'}
           >
-            {isAutoMode ? <Play className="h-3.5 w-3.5 text-blue-400 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
-            <span>Auto Mode {isAutoMode ? 'ON' : 'OFF'}</span>
+            {isAutoMode && isSectionEnabled ? <Play className="h-3.5 w-3.5 text-blue-400 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
+            <span>Auto Mode {isAutoMode && isSectionEnabled ? 'ON' : 'OFF'}</span>
             <span className="text-[10px] text-slate-400 font-mono">(A)</span>
           </button>
 
           {/* Test Now Button */}
           <button
             onClick={onTestNow}
-            disabled={isTestingNow || (!isOpen && false)}
+            disabled={isTestingNow || !isSectionEnabled}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-semibold text-white shadow-md transition ${
-              isTestingNow
+              !isSectionEnabled
+                ? 'bg-slate-700/60 text-slate-400 cursor-not-allowed shadow-none'
+                : isTestingNow
                 ? 'bg-blue-500/50 cursor-wait'
                 : 'bg-blue-600 hover:bg-blue-500 active:scale-95 shadow-blue-500/20'
             }`}
-            title="Fetch latest closed bar and evaluate prediction (Key: T)"
+            title={isSectionEnabled ? 'Fetch latest closed bar and evaluate prediction (Key: T)' : 'Available during trading hours only'}
           >
             {isTestingNow ? (
               <RefreshCw className="h-4 w-4 animate-spin text-white" />
             ) : (
-              <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
+              <Zap className={`h-4 w-4 ${isSectionEnabled ? 'text-amber-300 fill-amber-300' : 'text-slate-400'}`} />
             )}
             <span>Test Now</span>
-            <span className="text-xs bg-blue-700 px-1.5 py-0.5 rounded font-mono text-blue-200">T</span>
+            <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${isSectionEnabled ? 'bg-blue-700 text-blue-200' : 'bg-slate-800 text-slate-500'}`}>T</span>
           </button>
         </div>
       </div>
@@ -259,13 +274,22 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-slate-950/70 px-3 py-1.5 rounded border border-slate-800">
         <div className="flex items-center gap-2 text-slate-300">
           <Clock className="h-3.5 w-3.5 text-slate-400" />
-          <span>Next 5-min candle closes in: <strong className="font-mono text-blue-400">{formatCountdown(secondsToNextClose)}</strong></span>
+          <span>
+            Next 5-min candle closes in:{' '}
+            <strong className="font-mono text-blue-400">
+              {isOpen ? formatCountdown(secondsToNextClose) : '--:--'}
+            </strong>
+          </span>
         </div>
 
         {!isOpen && (
           <div className="flex items-center gap-1.5 text-amber-400">
             <AlertTriangle className="h-3.5 w-3.5" />
-            <span>Market closed — showing last completed session</span>
+            <span>
+              {isReplayActive
+                ? 'Market closed — Replay Mode active'
+                : 'Market closed — live testing enabled during trading hours only (09:30–16:00 ET)'}
+            </span>
           </div>
         )}
 
@@ -278,7 +302,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       </div>
 
       {/* Chart Canvas */}
-      <div className="relative">
+      <div className={`relative ${!isSectionEnabled ? 'pointer-events-none select-none' : ''}`}>
         {/* Tooltip Overlay */}
         {hoveredCandle && (
           <div className="absolute top-2 left-2 z-10 bg-slate-950/90 border border-slate-800 rounded px-2.5 py-1 text-xs font-mono flex items-center gap-3 text-slate-300 shadow">
