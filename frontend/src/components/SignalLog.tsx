@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SignalLogItem } from '../types/api';
-import { TimeZoneMode, formatBps, formatTimestamp } from '../lib/formatters';
+import { TimeZoneMode, formatBps, formatTimestamp, formatPrice } from '../lib/formatters';
 import { ListFilter, Download, ArrowUpRight, ArrowDownRight, Check, X, Clock } from 'lucide-react';
 
 interface SignalLogProps {
@@ -21,17 +21,32 @@ export const SignalLog: React.FC<SignalLogProps> = ({ signals, timeZone }) => {
 
   const handleExportCSV = () => {
     if (signals.length === 0) return;
-    const headers = ['Time_Epoch', 'Time_NY', 'Direction', 'Signal_Code', 'Confidence_Pct', 'Conviction', 'Entry_Price', 'Checksum'];
-    const rows = signals.map((s) => [
-      s.bar_time,
-      `"${s.bar_timestamp_ny}"`,
-      s.direction,
-      s.signal_code,
-      s.confidence_pct,
-      s.conviction,
-      s.entry_price,
-      s.checksum,
-    ]);
+    const headers = ['Time_Epoch', 'Time_NY', 'Direction', 'Signal_Code', 'Confidence_Pct', 'Conviction', 'Entry_Price', 'Target_Price', 'Stop_Price', 'Exit_Price', 'Return_Bps', 'Verdict', 'Checksum'];
+    const rows = signals.map((s) => {
+      const isUp = s.direction === 'Up';
+      const isDown = s.direction === 'Down';
+      const thetaPct = 0.0015;
+      const targetP = isUp ? (s.entry_price * (1 + thetaPct)).toFixed(2) : isDown ? (s.entry_price * (1 - thetaPct)).toFixed(2) : '';
+      const stopP = isUp ? (s.entry_price * (1 - thetaPct)).toFixed(2) : isDown ? (s.entry_price * (1 + thetaPct)).toFixed(2) : '';
+      const exitP = s.outcome?.exit_price ? s.outcome.exit_price.toFixed(2) : '';
+      const retBps = s.outcome?.realized_return_bps !== undefined ? s.outcome.realized_return_bps.toFixed(2) : '';
+      const verdict = s.outcome ? (s.outcome.is_hit ? 'HIT' : 'MISS') : 'PENDING';
+      return [
+        s.bar_time,
+        `"${s.bar_timestamp_ny}"`,
+        s.direction,
+        s.signal_code,
+        s.confidence_pct,
+        s.conviction,
+        s.entry_price,
+        targetP,
+        stopP,
+        exitP,
+        retBps,
+        verdict,
+        s.checksum,
+      ];
+    });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -93,9 +108,10 @@ export const SignalLog: React.FC<SignalLogProps> = ({ signals, timeZone }) => {
             <thead className="bg-slate-950 text-slate-400 text-[10px] uppercase sticky top-0 border-b border-slate-800">
               <tr>
                 <th className="p-1.5">Time</th>
-                <th className="p-1.5">Prediction</th>
-                <th className="p-1.5">Conf</th>
-                <th className="p-1.5">Actual</th>
+                <th className="p-1.5">Signal</th>
+                <th className="p-1.5">Entry</th>
+                <th className="p-1.5">Target / Stop</th>
+                <th className="p-1.5">Actual (15m)</th>
                 <th className="p-1.5">Verdict</th>
               </tr>
             </thead>
@@ -104,6 +120,17 @@ export const SignalLog: React.FC<SignalLogProps> = ({ signals, timeZone }) => {
                 const isUp = s.direction === 'Up';
                 const isDown = s.direction === 'Down';
                 const predLabel = s.direction === 'no clear signal' ? 'Neutral' : s.direction;
+                const thetaPct = 0.0015; // 15 bps
+                const targetPrice = isUp
+                  ? s.entry_price * (1 + thetaPct)
+                  : isDown
+                  ? s.entry_price * (1 - thetaPct)
+                  : null;
+                const stopPrice = isUp
+                  ? s.entry_price * (1 - thetaPct)
+                  : isDown
+                  ? s.entry_price * (1 + thetaPct)
+                  : null;
 
                 const actualDir = s.outcome
                   ? (s.outcome.actual_direction ??
@@ -129,7 +156,21 @@ export const SignalLog: React.FC<SignalLogProps> = ({ signals, timeZone }) => {
                       </span>
                     </td>
                     <td className="p-1.5 whitespace-nowrap text-slate-200">
-                      {s.confidence_pct.toFixed(0)}%
+                      {formatPrice(s.entry_price)}
+                    </td>
+                    <td className="p-1.5 whitespace-nowrap text-[10px]">
+                      {targetPrice && stopPrice ? (
+                        <div className="flex flex-col leading-tight">
+                          <span className={isUp ? 'text-emerald-400' : 'text-rose-400'}>
+                            T: {formatPrice(targetPrice)}
+                          </span>
+                          <span className="text-slate-400">
+                            S: {formatPrice(stopPrice)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500">±${(s.entry_price * thetaPct).toFixed(2)}</span>
+                      )}
                     </td>
                     <td className="p-1.5 whitespace-nowrap">
                       {s.outcome && actualDir ? (
@@ -139,7 +180,7 @@ export const SignalLog: React.FC<SignalLogProps> = ({ signals, timeZone }) => {
                             : actualDir === 'Down'
                             ? 'text-rose-400'
                             : 'text-slate-400'
-                        }`} title={`15m return: ${formatBps(s.outcome.realized_return_bps)}`}>
+                        }`} title={`15m return: ${formatBps(s.outcome.realized_return_bps)} | Exit: ${formatPrice(s.outcome.exit_price)}`}>
                           <span>{actualDir}</span>
                           <span className="text-[10px] text-slate-500">
                             ({formatBps(s.outcome.realized_return_bps).replace(' bps', 'bp')})

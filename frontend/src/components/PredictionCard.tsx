@@ -1,5 +1,5 @@
 import React from 'react';
-import { PredictionSignal, MetaResponse } from '../types/api';
+import { PredictionSignal, MetaResponse, CandleBar } from '../types/api';
 import { TimeZoneMode, formatPrice, formatPct, formatTimestamp } from '../lib/formatters';
 import { 
   ArrowUpRight, 
@@ -10,13 +10,18 @@ import {
   HelpCircle, 
   Target, 
   CheckCircle2, 
-  AlertCircle 
+  Crosshair,
+  Shield,
+  Activity,
+  Layers,
+  Scale
 } from 'lucide-react';
 
 interface PredictionCardProps {
   signal?: PredictionSignal;
   meta?: MetaResponse;
   timeZone: TimeZoneMode;
+  recentBars?: CandleBar[];
   onOpenGuideAnchor?: (anchor: string) => void;
 }
 
@@ -24,6 +29,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
   signal,
   meta,
   timeZone,
+  recentBars = [],
   onOpenGuideAnchor,
 }) => {
   if (!signal) {
@@ -45,7 +51,38 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
   const isNeutral = signal.direction === 'no clear signal';
 
   const thetaPct = meta?.theta_pct ?? 0.15;
+  const thetaBps = meta?.theta_bps ?? 15.0;
   const horizonMin = meta?.horizon_minutes ?? 15;
+  const frictionBps = meta?.cost_assumption?.institutional_friction_bps ?? 8.0;
+
+  // Exact Target and Stop Loss Levels in Dollars
+  const closePrice = signal.close_price;
+  const priceMoveDollar = closePrice * (thetaPct / 100);
+
+  const targetPrice = isUp
+    ? closePrice + priceMoveDollar
+    : isDown
+    ? closePrice - priceMoveDollar
+    : closePrice;
+
+  const stopPrice = isUp
+    ? closePrice - priceMoveDollar
+    : isDown
+    ? closePrice + priceMoveDollar
+    : closePrice;
+
+  const netExpectedBps = thetaBps - frictionBps;
+
+  // Compute Volume & VWAP Context from recent bars
+  const latestBar = recentBars.length > 0 ? recentBars[recentBars.length - 1] : undefined;
+  const volWindow = recentBars.slice(-12);
+  const avgVol = volWindow.length > 0 
+    ? volWindow.reduce((acc, b) => acc + b.volume, 0) / volWindow.length 
+    : 0;
+  const rvol = avgVol > 0 && latestBar ? latestBar.volume / avgVol : 1.0;
+
+  const currentVwap = latestBar?.vwap ?? closePrice;
+  const vwapDistBps = currentVwap > 0 ? ((closePrice - currentVwap) / currentVwap) * 10000 : 0;
 
   const tooltipExplanation = isUp
     ? `Calibrated probability that the next ${horizonMin} minutes closes at least +${thetaPct}% higher.`
@@ -54,7 +91,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
     : `Conviction is below threshold (${(signal.conviction).toFixed(4)} < ${signal.threshold.toFixed(4)}). No strong directional movement predicted.`;
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col gap-4 shadow-lg shadow-black/20">
+    <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col gap-3.5 shadow-lg shadow-black/20">
       {/* Top Header: Badge & Confidence */}
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -98,6 +135,108 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
         >
           <Lock className="h-3 w-3 text-emerald-500" />
           <span>Locked</span>
+        </div>
+      </div>
+
+      {/* Actionable Trader Execution Corridor (Target & Stop Levels) */}
+      {!isNeutral && (
+        <div className="bg-slate-950/90 rounded-md border border-slate-800 p-2.5 flex flex-col gap-2">
+          <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            <span className="flex items-center gap-1">
+              <Crosshair className="h-3.5 w-3.5 text-blue-400" />
+              <span>Target & Invalidation Levels</span>
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">θ = ±{thetaBps} bps</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {/* Target Price */}
+            <div className={`p-2 rounded border flex flex-col gap-0.5 ${
+              isUp 
+                ? 'bg-emerald-950/30 border-emerald-800/60' 
+                : 'bg-rose-950/30 border-rose-800/60'
+            }`}>
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold uppercase">
+                <span>Profit Target</span>
+                <span className={isUp ? 'text-emerald-400' : 'text-rose-400'}>
+                  {isUp ? `+${priceMoveDollar.toFixed(2)}` : `-${priceMoveDollar.toFixed(2)}`}
+                </span>
+              </div>
+              <div className={`text-base font-bold font-mono ${isUp ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {formatPrice(targetPrice)}
+              </div>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {isUp ? `+${thetaBps} bps` : `-${thetaBps} bps`} ({horizonMin}m)
+              </span>
+            </div>
+
+            {/* Invalidation Stop */}
+            <div className="p-2 rounded border bg-slate-900 border-slate-800 flex flex-col gap-0.5">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold uppercase">
+                <span className="flex items-center gap-1">
+                  <Shield className="h-2.5 w-2.5 text-amber-400" />
+                  <span>Invalidation Stop</span>
+                </span>
+                <span className="text-amber-400">
+                  {isUp ? `-${priceMoveDollar.toFixed(2)}` : `+${priceMoveDollar.toFixed(2)}`}
+                </span>
+              </div>
+              <div className="text-base font-bold font-mono text-slate-200">
+                {formatPrice(stopPrice)}
+              </div>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {isUp ? `-${thetaBps} bps` : `+${thetaBps} bps`} cutoff
+              </span>
+            </div>
+          </div>
+
+          {/* Execution Friction / Net Edge meter */}
+          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5 border-t border-slate-800/60">
+            <span className="flex items-center gap-1">
+              <Scale className="h-3 w-3 text-slate-500" />
+              <span>Friction Hurdle: <strong>{frictionBps.toFixed(1)} bps</strong></span>
+            </span>
+            <span className={netExpectedBps > 0 ? 'text-emerald-400 font-semibold' : 'text-rose-400'}>
+              Net Edge: +{netExpectedBps.toFixed(1)} bps
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Market Quality & Liquidity Badges (RVOL & VWAP) */}
+      <div className="grid grid-cols-2 gap-1.5 text-xs font-mono">
+        {/* RVOL Badge */}
+        <div className="bg-slate-950 p-2 rounded border border-slate-800/80 flex items-center justify-between" title="Relative Volume vs 12-bar rolling average (1 hour)">
+          <span className="text-[11px] text-slate-400 flex items-center gap-1">
+            <Activity className="h-3 w-3 text-blue-400" />
+            <span>RVOL:</span>
+          </span>
+          <span className={`font-bold ${
+            rvol >= 1.5 
+              ? 'text-emerald-400' 
+              : rvol >= 0.8 
+              ? 'text-slate-200' 
+              : 'text-amber-400'
+          }`}>
+            {rvol.toFixed(1)}x {rvol >= 1.5 ? '(Surge)' : rvol < 0.8 ? '(Dry)' : ''}
+          </span>
+        </div>
+
+        {/* VWAP Distance Badge */}
+        <div className="bg-slate-950 p-2 rounded border border-slate-800/80 flex items-center justify-between" title="Distance from session Volume-Weighted Average Price">
+          <span className="text-[11px] text-slate-400 flex items-center gap-1">
+            <Layers className="h-3 w-3 text-sky-400" />
+            <span>VWAP:</span>
+          </span>
+          <span className={`font-bold ${
+            vwapDistBps > 5 
+              ? 'text-emerald-400' 
+              : vwapDistBps < -5 
+              ? 'text-rose-400' 
+              : 'text-slate-300'
+          }`}>
+            {vwapDistBps >= 0 ? `+${vwapDistBps.toFixed(0)}bp` : `${vwapDistBps.toFixed(0)}bp`}
+          </span>
         </div>
       </div>
 
@@ -199,7 +338,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
           <strong className="text-slate-200 font-mono">{formatPrice(signal.close_price)}</strong>
         </div>
         <div className="flex items-center justify-between">
-          <span>Horizon Expiry:</span>
+          <span>Horizon Expiry (15m):</span>
           <span className="text-slate-300 font-mono">{formatTimestamp(signal.horizon_end_utc, timeZone)}</span>
         </div>
       </div>
@@ -234,4 +373,3 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
     </div>
   );
 };
-

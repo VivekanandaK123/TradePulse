@@ -537,6 +537,7 @@ export const App: React.FC = () => {
               signal={latestSignal}
               meta={meta || undefined}
               timeZone={timeZone}
+              recentBars={recentBars}
               onOpenGuideAnchor={(anchor) => {
                 setGuideAnchor(anchor);
                 setIsGuideOpen(true);

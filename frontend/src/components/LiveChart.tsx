@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, UTCTimestamp } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, LineData, UTCTimestamp } from 'lightweight-charts';
 import { CandleBar, PredictionSignal, MarketStatus } from '../types/api';
 import { TimeZoneMode, formatPrice, formatDateWithTime, formatCountdown, formatChartTick, formatChartTime } from '../lib/formatters';
-import { Zap, Play, Pause, AlertTriangle, Clock, RefreshCw, Trash2 } from 'lucide-react';
+import { Zap, Play, Pause, AlertTriangle, Clock, RefreshCw, Trash2, Layers } from 'lucide-react';
 
 interface LiveChartProps {
   recentBars: CandleBar[];
@@ -37,7 +37,11 @@ export const LiveChart: React.FC<LiveChartProps> = ({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const targetPriceLineRef = useRef<any>(null);
+  const stopPriceLineRef = useRef<any>(null);
 
+  const [showVwap, setShowVwap] = useState<boolean>(true);
   const [hoveredCandle, setHoveredCandle] = useState<CandleBar | null>(null);
 
   const isOpen = marketStatus?.is_open ?? false;
@@ -93,9 +97,18 @@ export const LiveChart: React.FC<LiveChartProps> = ({
       },
     });
 
+    const vwapSeries = chart.addLineSeries({
+      color: '#38bdf8', // sky-400
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: 'VWAP',
+    });
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
+    vwapSeriesRef.current = vwapSeries;
 
     chart.subscribeCrosshairMove((param) => {
       if (!param.time || !param.seriesData) {
@@ -103,6 +116,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         return;
       }
       const data = param.seriesData.get(candleSeries) as any;
+      const vwapVal = param.seriesData.get(vwapSeries) as any;
       if (data) {
         setHoveredCandle({
           time: Number(param.time),
@@ -111,6 +125,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
           low: data.low,
           close: data.close,
           volume: 0,
+          vwap: vwapVal?.value ?? undefined,
         });
       }
     });
@@ -130,18 +145,28 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
   // Update Data and Markers
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+    if (!candleSeriesRef.current || !volumeSeriesRef.current || !vwapSeriesRef.current) return;
 
     if (recentBars.length === 0 && !formingBar) {
       candleSeriesRef.current.setData([]);
       volumeSeriesRef.current.setData([]);
+      vwapSeriesRef.current.setData([]);
       candleSeriesRef.current.setMarkers([]);
+      if (targetPriceLineRef.current) {
+        candleSeriesRef.current.removePriceLine(targetPriceLineRef.current);
+        targetPriceLineRef.current = null;
+      }
+      if (stopPriceLineRef.current) {
+        candleSeriesRef.current.removePriceLine(stopPriceLineRef.current);
+        stopPriceLineRef.current = null;
+      }
       setHoveredCandle(null);
       return;
     }
 
     const candleData: CandlestickData[] = [];
     const volumeData: HistogramData[] = [];
+    const vwapData: LineData[] = [];
 
     const allBars = [...recentBars];
     if (formingBar) {
@@ -172,10 +197,62 @@ export const LiveChart: React.FC<LiveChartProps> = ({
         value: b.volume,
         color: isForming ? '#33415555' : (isUp ? '#05966955' : '#dc262655'),
       });
+
+      if (b.vwap !== undefined && b.vwap !== null) {
+        vwapData.push({
+          time: b.time as UTCTimestamp,
+          value: b.vwap,
+        });
+      }
     });
 
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
+
+    if (showVwap) {
+      vwapSeriesRef.current.setData(vwapData);
+    } else {
+      vwapSeriesRef.current.setData([]);
+    }
+
+    // Dynamic Target & Invalidation Stop Price Lines on Candlestick Chart
+    if (targetPriceLineRef.current) {
+      candleSeriesRef.current.removePriceLine(targetPriceLineRef.current);
+      targetPriceLineRef.current = null;
+    }
+    if (stopPriceLineRef.current) {
+      candleSeriesRef.current.removePriceLine(stopPriceLineRef.current);
+      stopPriceLineRef.current = null;
+    }
+
+    if (latestSignal && (latestSignal.direction === 'Up' || latestSignal.direction === 'Down')) {
+      const isUp = latestSignal.direction === 'Up';
+      const thetaPct = 0.0015; // 15 bps
+      const targetPrice = isUp
+        ? latestSignal.close_price * (1 + thetaPct)
+        : latestSignal.close_price * (1 - thetaPct);
+      const stopPrice = isUp
+        ? latestSignal.close_price * (1 - thetaPct)
+        : latestSignal.close_price * (1 + thetaPct);
+
+      targetPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+        price: Number(targetPrice.toFixed(2)),
+        color: isUp ? '#10b981' : '#ef4444',
+        lineWidth: 2,
+        lineStyle: 2, // Dashed
+        axisLabelVisible: true,
+        title: isUp ? 'TARGET (+15bp)' : 'TARGET (-15bp)',
+      });
+
+      stopPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+        price: Number(stopPrice.toFixed(2)),
+        color: '#f59e0b',
+        lineWidth: 1,
+        lineStyle: 1, // Dotted
+        axisLabelVisible: true,
+        title: 'STOP LOSS',
+      });
+    }
 
     // Attach Signal Markers for closed candles
     const markers: any[] = [];
@@ -217,7 +294,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
     candleSeriesRef.current.setMarkers(markers);
     chartRef.current?.timeScale().fitContent();
-  }, [recentBars, formingBar, latestSignal]);
+  }, [recentBars, formingBar, latestSignal, showVwap]);
 
   // Update Timezone formatting
   useEffect(() => {
@@ -255,6 +332,20 @@ export const LiveChart: React.FC<LiveChartProps> = ({
 
         {/* Primary Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* VWAP Overlay Toggle */}
+          <button
+            onClick={() => setShowVwap(!showVwap)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-mono font-medium border transition ${
+              showVwap
+                ? 'bg-sky-950/60 text-sky-300 border-sky-700/80'
+                : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+            }`}
+            title="Toggle Intraday VWAP (Volume-Weighted Average Price) overlay"
+          >
+            <Layers className="h-3.5 w-3.5 text-sky-400" />
+            <span>VWAP {showVwap ? 'ON' : 'OFF'}</span>
+          </button>
+
           {/* Clear Button */}
           <button
             onClick={onClear}
@@ -348,6 +439,9 @@ export const LiveChart: React.FC<LiveChartProps> = ({
             <span>H: <strong className="text-emerald-400">{formatPrice(hoveredCandle.high)}</strong></span>
             <span>L: <strong className="text-rose-400">{formatPrice(hoveredCandle.low)}</strong></span>
             <span>C: <strong className="text-slate-100">{formatPrice(hoveredCandle.close)}</strong></span>
+            {hoveredCandle.vwap !== undefined && (
+              <span>VWAP: <strong className="text-sky-400">{formatPrice(hoveredCandle.vwap)}</strong></span>
+            )}
           </div>
         )}
 
