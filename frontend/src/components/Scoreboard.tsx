@@ -1,6 +1,6 @@
 import React from 'react';
 import { OutcomesResponse, MetaResponse } from '../types/api';
-import { formatBps, formatPct } from '../lib/formatters';
+import { formatPct } from '../lib/formatters';
 import { Award, TrendingUp, AlertCircle } from 'lucide-react';
 
 interface ScoreboardProps {
@@ -11,14 +11,11 @@ interface ScoreboardProps {
 
 export const Scoreboard: React.FC<ScoreboardProps> = ({
   outcomes,
-  meta,
-  signalsTodayCount = 0,
 }) => {
   const totalOutcomes = outcomes?.outcomes.length ?? 0;
   const hits = outcomes?.outcomes.filter((o) => o.is_hit).length ?? 0;
   const hitRate = totalOutcomes > 0 ? (hits / totalOutcomes) * 100 : 0;
 
-  const expectedDaily = meta?.signal_rule.expected_signals_per_day ?? 37.5;
   const alwaysUpWinRate = 33.3; // Random baseline prior
 
   return (
@@ -28,21 +25,9 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({
           <Award className="h-4 w-4 text-blue-400" />
           Today's Scoreboard
         </span>
-        <span className="text-[11px] font-mono text-slate-400">
-          Target: {expectedDaily.toFixed(1)} sigs/day
-        </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        {/* Signals Emitted Today */}
-        <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80 flex flex-col">
-          <span className="text-slate-400">Signals Emitted</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-lg font-bold font-mono text-slate-100">{signalsTodayCount}</span>
-            <span className="text-slate-500 text-[11px]">/ {expectedDaily.toFixed(0)} exp</span>
-          </div>
-        </div>
-
+      <div className="text-xs">
         {/* Realized 15-Min Win Rate */}
         <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80 flex flex-col">
           <span className="text-slate-400">Realized Hit Rate</span>

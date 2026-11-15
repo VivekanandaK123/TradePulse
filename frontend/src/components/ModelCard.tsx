@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MetaResponse } from '../types/api';
 import { formatBps, formatPct } from '../lib/formatters';
-import { FileCode, ChevronDown, ChevronUp, AlertOctagon, ShieldCheck } from 'lucide-react';
+import { FileCode, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ModelCardProps {
   meta?: MetaResponse;
@@ -31,23 +31,6 @@ export const ModelCard: React.FC<ModelCardProps> = ({ meta }) => {
           {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </div>
       </button>
-
-      {/* Edge Demonstrated Critical Notice (Always visible!) */}
-      <div className={`p-2.5 rounded border text-xs flex items-start gap-2 ${
-        meta.edge_demonstrated
-          ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-          : 'bg-rose-950/40 border-rose-800/80 text-rose-300'
-      }`}>
-        <AlertOctagon className="h-4 w-4 flex-shrink-0 mt-0.5 text-rose-400" />
-        <div>
-          <strong className="font-semibold block">
-            {meta.edge_demonstrated ? 'Edge Demonstrated' : 'No Profitable Edge After Costs'}
-          </strong>
-          <span className="text-[11px] text-rose-200/90 leading-relaxed block mt-0.5">
-            {meta.edge_statement}
-          </span>
-        </div>
-      </div>
 
       {/* Target Labeling Formula (Always visible!) */}
       <div className="bg-slate-950/80 border border-slate-800/90 rounded p-2.5 text-[11px] flex flex-col gap-1.5">
