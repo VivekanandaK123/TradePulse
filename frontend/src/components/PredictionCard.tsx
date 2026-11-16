@@ -200,6 +200,39 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
               Net Edge: +{netExpectedBps.toFixed(1)} bps
             </span>
           </div>
+
+          {/* Actionable Zone Decision Matrix (When to Join / When to Back) */}
+          <div className="flex flex-col gap-1.5 pt-1 border-t border-slate-800/60 text-[11px] font-mono">
+            {/* Green Zone: When to Join */}
+            <div className="flex items-start gap-2 bg-emerald-950/40 border border-emerald-800/50 rounded p-1.5 text-emerald-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 mt-0.5 shrink-0" />
+              <div>
+                <span className="font-bold text-emerald-200 uppercase">When to Join: </span>
+                {isUp
+                  ? `Enter long near $${closePrice.toFixed(2)} into support. Target: $${targetPrice.toFixed(2)} (+15 bps).`
+                  : `Enter short near $${closePrice.toFixed(2)} off resistance. Target: $${targetPrice.toFixed(2)} (-15 bps).`}
+              </div>
+            </div>
+
+            {/* Red Zone: When to Back Out */}
+            <div className="flex items-start gap-2 bg-rose-950/40 border border-rose-800/50 rounded p-1.5 text-rose-300">
+              <span className="h-2 w-2 rounded-full bg-rose-400 mt-0.5 shrink-0" />
+              <div>
+                <span className="font-bold text-rose-200 uppercase">When to Back Out: </span>
+                {isUp
+                  ? `Cut trade immediately if price breaks below $${stopPrice.toFixed(2)} (-15 bps Invalidation) or take profit at $${targetPrice.toFixed(2)}.`
+                  : `Cut trade immediately if price breaks above $${stopPrice.toFixed(2)} (+15 bps Invalidation) or take profit at $${targetPrice.toFixed(2)}.`}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Neutral Signal Trader Guidance */}
+      {isNeutral && (
+        <div className="bg-slate-950/80 rounded-md border border-slate-800 p-2.5 flex items-center gap-2 text-xs text-slate-400 font-mono">
+          <span className="h-2 w-2 rounded-full bg-slate-500 shrink-0" />
+          <span><strong>When to Back Out:</strong> Conviction is below threshold (&tau;). Stay on sidelines—no statistical directional edge.</span>
         </div>
       )}
 

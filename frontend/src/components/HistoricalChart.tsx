@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, LineData, UTCTimestamp } from 'lightweight-charts';
 import { CandleBar, PeriodBand, OOFSignalItem } from '../types/api';
 import { TimeZoneMode, formatPrice, formatDateWithTime, formatChartTick, formatChartTime } from '../lib/formatters';
-import { Layers, Eye, Info } from 'lucide-react';
+import { Layers, Eye, Info, ShieldCheck } from 'lucide-react';
+import { calculateSRData, SRZone } from './LiveChart';
 
 interface HistoricalChartProps {
   bars: CandleBar[];
@@ -33,7 +34,47 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
   const [showVwap, setShowVwap] = useState(false);
   const [showVolume, setShowVolume] = useState(true);
   const [showOofSignals, setShowOofSignals] = useState(false);
+  const [showSR, setShowSR] = useState(true);
+  const [visualZones, setVisualZones] = useState<any[]>([]);
+  const [containerWidth, setContainerWidth] = useState<number>(600);
   const [hoveredCandle, setHoveredCandle] = useState<CandleBar | null>(null);
+
+  const resistancePriceLineRef = useRef<any>(null);
+  const supportPriceLineRef = useRef<any>(null);
+
+  const updateZoneOverlay = useCallback(() => {
+    if (!candleSeriesRef.current || !chartContainerRef.current || bars.length < 3) {
+      setVisualZones([]);
+      return;
+    }
+
+    const srData = calculateSRData(bars);
+    const zonesToDraw: SRZone[] = [];
+    if (srData.resistanceZone) zonesToDraw.push(srData.resistanceZone);
+    if (srData.supportZone) zonesToDraw.push(srData.supportZone);
+
+    const mapped: any[] = [];
+    zonesToDraw.forEach((z) => {
+      const y1 = candleSeriesRef.current?.priceToCoordinate(z.topPrice);
+      const y2 = candleSeriesRef.current?.priceToCoordinate(z.bottomPrice);
+      if (y1 !== null && y2 !== null && y1 !== undefined && y2 !== undefined) {
+        const topY = Math.min(y1, y2);
+        const bottomY = Math.max(y1, y2);
+        const height = Math.max(bottomY - topY, 14);
+        mapped.push({
+          ...z,
+          yTop: topY,
+          yBottom: bottomY,
+          height: height,
+        });
+      }
+    });
+
+    setVisualZones(mapped);
+    if (chartContainerRef.current) {
+      setContainerWidth(chartContainerRef.current.clientWidth);
+    }
+  }, [bars]);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -124,15 +165,22 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
     const handleResize = () => {
       if (chartContainerRef.current) {
         chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+        setContainerWidth(chartContainerRef.current.clientWidth);
+        updateZoneOverlay();
       }
     };
     window.addEventListener('resize', handleResize);
+
+    // Re-sync S/R zones when historical chart zooms or pans
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      updateZoneOverlay();
+    });
 
     return () => {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, []);
+  }, [updateZoneOverlay]);
 
   // Update Data when bars change
   useEffect(() => {
@@ -190,8 +238,47 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
       candleSeriesRef.current.setMarkers([]);
     }
 
+    // Dynamic Historical Support & Resistance Price Lines
+    if (resistancePriceLineRef.current) {
+      candleSeriesRef.current.removePriceLine(resistancePriceLineRef.current);
+      resistancePriceLineRef.current = null;
+    }
+    if (supportPriceLineRef.current) {
+      candleSeriesRef.current.removePriceLine(supportPriceLineRef.current);
+      supportPriceLineRef.current = null;
+    }
+
+    if (showSR && sorted.length >= 3) {
+      const srData = calculateSRData(sorted);
+      if (srData.resistancePrice) {
+        resistancePriceLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: Number(srData.resistancePrice.toFixed(2)),
+          color: '#ef4444',
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: true,
+          title: 'Resistance',
+        });
+      }
+      if (srData.supportPrice) {
+        supportPriceLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: Number(srData.supportPrice.toFixed(2)),
+          color: '#10b981',
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: true,
+          title: 'Support',
+        });
+      }
+    }
+
     chartRef.current?.timeScale().fitContent();
-  }, [bars, showOofSignals, oofSignals]);
+
+    const timer = setTimeout(() => {
+      updateZoneOverlay();
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [bars, showOofSignals, oofSignals, showSR, updateZoneOverlay]);
 
   // Update VWAP visibility
   useEffect(() => {
@@ -247,6 +334,19 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
 
         {/* Indicator Toggles */}
         <div className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-1 cursor-pointer text-slate-400 hover:text-slate-200" title="Toggle Support (Green/Join) and Resistance (Red/Back) Zones and Lines">
+            <input
+              type="checkbox"
+              checked={showSR}
+              onChange={(e) => setShowSR(e.target.checked)}
+              className="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0"
+            />
+            <span className="flex items-center gap-1">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              <span>S/R Zones & Lines</span>
+            </span>
+          </label>
+
           <label className="flex items-center gap-1 cursor-pointer text-slate-400 hover:text-slate-200">
             <input
               type="checkbox"
@@ -321,6 +421,47 @@ export const HistoricalChart: React.FC<HistoricalChartProps> = ({
             <span>L: <strong className="text-rose-400">{formatPrice(hoveredCandle.low)}</strong></span>
             <span>C: <strong className="text-slate-100">{formatPrice(hoveredCandle.close)}</strong></span>
           </div>
+        )}
+
+        {/* TradingView-Style Horizontal Shaded S/R Zones SVG Overlay */}
+        {showSR && visualZones.length > 0 && (
+          <svg
+            className="absolute inset-0 pointer-events-none w-full h-full z-[5]"
+            style={{ overflow: 'hidden' }}
+          >
+            <defs>
+              <linearGradient id="histGreenZoneGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#10b981" stopOpacity="0.14" />
+                <stop offset="100%" stopColor="#10b981" stopOpacity="0.05" />
+              </linearGradient>
+              <linearGradient id="histRedZoneGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.14" />
+                <stop offset="100%" stopColor="#ef4444" stopOpacity="0.05" />
+              </linearGradient>
+            </defs>
+
+            {visualZones.map((z, idx) => {
+              const isGreen = z.type === 'support';
+              const fill = isGreen ? 'url(#histGreenZoneGrad)' : 'url(#histRedZoneGrad)';
+              const stroke = isGreen ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)';
+              const plotWidth = Math.max(100, containerWidth - 62);
+
+              return (
+                <rect
+                  key={`${z.type}-${idx}`}
+                  x={2}
+                  y={z.yTop}
+                  width={plotWidth - 4}
+                  height={z.height}
+                  fill={fill}
+                  stroke={stroke}
+                  strokeWidth={1}
+                  strokeDasharray="4 3"
+                  rx={2}
+                />
+              );
+            })}
+          </svg>
         )}
 
         <div ref={chartContainerRef} className="w-full rounded overflow-hidden" />
