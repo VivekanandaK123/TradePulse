@@ -54,7 +54,7 @@ METADATA_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-CHOSEN_LABEL = "label_fixed_20bp"
+CHOSEN_LABEL = "label_fixed_15bp"
 
 
 def run_pipeline():
@@ -245,6 +245,14 @@ def run_pipeline():
     print(val_grid_rf[cols_show].to_string(index=False))
 
     # Evaluate Ensemble Grid on Validation
+    oof_grid_ens = evaluate_threshold_grid(
+        session_dates=oof_dates,
+        y_true=oof_y_rf,
+        actual_returns=oof_ret_rf,
+        probs=oof_cal_ens,
+        n_bootstraps=1000,
+        seed=42,
+    )
     val_grid_ens = evaluate_threshold_grid(
         session_dates=valid_val["session_date"],
         y_true=y_val,
@@ -322,14 +330,14 @@ def run_pipeline():
     # Production Signal Rule Config
     # Check if profitable edge was found in Training OOF
     # We examine if any threshold had lower CI > 0
-    profitable_specs = oof_grid_rf[oof_grid_rf["profitable_edge_at_8bp"] == True]
+    profitable_specs = oof_grid_ens[oof_grid_ens["profitable_edge_at_8bp"] == True]
     edge_demonstrated = len(profitable_specs) > 0
 
-    selected_rule_row = val_grid_rf[val_grid_rf["rule_desc"] == "Top 10% Conviction"].iloc[0]
+    selected_rule_row = val_grid_ens[val_grid_ens["rule_desc"] == "Top 10% Conviction"].iloc[0]
     conservative_rule = {
         "chosen_target_label": CHOSEN_LABEL,
         "demonstrated_net_edge_after_costs": bool(edge_demonstrated),
-        "primary_model": "RandomForestClassifier",
+        "primary_model": "Ensemble (50% Calibrated RF + 50% Calibrated LR)",
         "calibration_method": "sigmoid_platt_ovr",
         "calibrator_fit_dataset": "Training_Out_Of_Fold_5_Purged_Folds",
         "signal_rule": {
@@ -367,6 +375,7 @@ def run_pipeline():
         "performance_by_tod": tod_perf_rf.to_dict(orient="records"),
         "calibration_comparison": cal_results,
         "training_oof_gating_grid": oof_grid_rf.to_dict(orient="records"),
+        "training_oof_gating_grid_ens": oof_grid_ens.to_dict(orient="records"),
         "validation_gating_grid_rf": val_grid_rf.to_dict(orient="records"),
         "validation_gating_grid_ens": val_grid_ens.to_dict(orient="records"),
         "validation_simulation_non_overlapping": sim_rows,
